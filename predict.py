@@ -16,6 +16,7 @@ def run_prediction():
     # 使用 argparse 处理命令行参数
     parser = argparse.ArgumentParser(description="Mag7 + 指数 排序预测工具")
     parser.add_argument("timeframe", nargs="?", default="1d", help="预测周期 (如 1d, 15m, 1h)")
+    parser.add_argument("--date", help="指定历史分析日期 (格式: YYYY-MM-DD 或 'YYYY-MM-DD HH:MM:SS')")
     
     args = parser.parse_args()
     
@@ -43,14 +44,32 @@ def run_prediction():
         print(f"请先运行训练命令 (例如: make train-{tf_str})")
         return
 
-    print(f"正在获取 {len(symbols)} 个标的 ({tf_str}) 的最新数据进行预测...")
+    # 1. 确定时间范围
+    if args.date:
+        try:
+            if len(args.date) > 10:
+                target_dt = datetime.strptime(args.date, "%Y-%m-%d %H:%M:%S")
+            else:
+                target_dt = datetime.strptime(args.date, "%Y-%m-%d")
+            
+            # 为了计算特征，需要从目标时间往前拉数据
+            start_date = target_dt - timedelta(days=60)
+            # 往后拉一点点以防万一
+            end_date = target_dt + timedelta(days=1)
+            prediction_mode_desc = f"历史分析时刻: {target_dt}"
+        except ValueError:
+            print("错误: 日期格式无效。请使用 YYYY-MM-DD 或 'YYYY-MM-DD HH:MM:SS'")
+            return
+    else:
+        target_dt = None
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=60)
+        prediction_mode_desc = "最新实时数据分析"
+
+    print(f"正在获取 {len(symbols)} 个标的 ({tf_str}) 数据进行预测 ({prediction_mode_desc})...")
     
     try:
         provider = DataProvider()
-        end_date = datetime.now()
-        # 拉取最近 60 天的数据以计算特征
-        start_date = end_date - timedelta(days=60)
-        
         df_raw = provider.fetch_bars(symbols, timeframe, start_date, end_date)
         
         if df_raw.empty:
@@ -59,22 +78,30 @@ def run_prediction():
 
         # 2. 特征工程
         builder = FeatureBuilder()
-        # is_training=False 
         df_features = builder.add_all_features(df_raw, is_training=False)
         
-        # 每个 symbol 选最后一条记录，使用 .copy() 避免 SettingWithCopyWarning
-        latest_data = df_features.groupby('symbol').tail(1).copy()
-        
+        # 3. 筛选预测时刻的数据
+        if target_dt:
+            # 找到最接近 target_dt 的 timestamp
+            df_features['dt_diff'] = (df_features['timestamp'] - target_dt).abs()
+            closest_ts = df_features.sort_values('dt_diff').iloc[0]['timestamp']
+            print(f"匹配到最接近的行情时刻: {closest_ts}")
+            latest_data = df_features[df_features['timestamp'] == closest_ts].copy()
+        else:
+            # 使用最新的一个 timestamp
+            latest_ts = df_features['timestamp'].max()
+            latest_data = df_features[df_features['timestamp'] == latest_ts].copy()
+            
         if latest_data.empty:
             print("错误: 处理后的数据为空。")
             return
             
-        latest_time = latest_data['timestamp'].max()
+        analysis_time = latest_data['timestamp'].iloc[0]
         
-        # 3. 加载模型
+        # 4. 加载模型
         model = joblib.load(model_path)
         
-        # 4. 特征列
+        # 5. 定义特征列 (必须与训练时一致)
         feature_cols = [
             'return_1d', 'return_5d', 'ma_5', 'ma_20', 
             'ma_ratio', 'rsi', 'volatility_20d',
@@ -84,7 +111,7 @@ def run_prediction():
             'fvg_up', 'fvg_down', 'displacement'
         ]
         
-        # 5. 执行预测 (评分)
+        # 6. 执行预测 (评分)
         latest_data['score'] = model.predict(latest_data[feature_cols])
         
         # 排序
@@ -92,17 +119,17 @@ def run_prediction():
         
         print("\n" + "="*50)
         print(f"Mag7 排序预测分析 ({tf_str})")
-        print(f"分析基准时间: {latest_time}")
+        print(f"分析时刻: {analysis_time}")
         print("-" * 50)
-        print(f"{'代码':<8} | {'当前价格':<10} | {'预测得分':<10}")
+        print(f"{'代码':<8} | {'收盘价格':<10} | {'预测得分':<10}")
         print("-" * 50)
         
-        for idx, row in results.iterrows():
+        for _, row in results.iterrows():
             print(f"{row['symbol']:<8} | {row['close']:<10.2f} | {row['score']:<10.4f}")
             
         print("-" * 50)
         top_symbol = results.iloc[0]['symbol']
-        print(f"👉 策略建议: 优先关注 {top_symbol}")
+        print(f"👉 当时建议: 优先关注 {top_symbol}")
         print("="*50)
 
     except Exception as e:

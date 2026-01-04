@@ -10,6 +10,8 @@ help:
 	@echo "  make backtest-1h   - 运行小时线策略回测"
 	@echo "  make backtest-15m  - 运行15分钟线策略回测"
 	@echo "  make predict-1d    - 运行当日预测 (日线)"
+	@echo "  make predict-1h    - 运行当日预测 (小时线)"
+	@echo "  make predict-hist tf=1d date=YYYY-MM-DD  - 指定日期历史预测"
 	@echo "  make setup         - 安装依赖"
 	@echo "  make clean         - 清理输出文件"
 
@@ -36,6 +38,12 @@ backtest-15m:
 # 预测命令
 predict-1d:
 	uv run python predict.py 1d
+
+predict-1h:
+	uv run python predict.py 1h
+
+predict-hist:
+	uv run python predict.py $(tf) --date "$(date)"
 
 # 环境与清理
 setup:
