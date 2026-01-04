@@ -150,8 +150,17 @@ def run_prediction():
             print(f"{row['symbol']:<8} | {row['close']:<10.2f} | {row['score']:<10.4f}")
             
         print("-" * 50)
-        top_symbol = results.iloc[0]['symbol']
-        print(f"👉 当时建议: 优先关注 {top_symbol}")
+        if len(results) > 1:
+            top_symbol = results.iloc[0]['symbol']
+            bottom_symbol = results.iloc[-1]['symbol']
+            print(f"📈 建议做多 (Long): {top_symbol}")
+            print(f"📉 建议做空 (Short): {bottom_symbol}")
+        else:
+            symbol = results.iloc[0]['symbol']
+            score = results.iloc[0]['score']
+            direction = "看涨 (Bullish)" if score > 0 else "看跌 (Bearish)"
+            icon = "🚀" if score > 0 else "⚠️"
+            print(f"{icon} 方向建议: {symbol} 目前{direction}")
         print("="*50)
 
     except Exception as e:

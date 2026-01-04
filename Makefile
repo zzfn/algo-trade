@@ -13,8 +13,8 @@ help:
 	@echo "  make backtest-universal [tf=1h] [days=90] [symbols=A,B] - 运行周期通用的策略回测"
 	@echo "  make predict-1d    - 运行当日预测 (日线)"
 	@echo "  make predict-1h    - 运行当日预测 (小时线)"
-	@echo "  make predict-universal [tf=1h] [symbols=A,B] [date=...] - 运行周期通用模型预测"
-	@echo "  make predict-hist tf=1d date=YYYY-MM-DD  - 指定日期历史预测"
+	@echo "  make predict-universal [tf=1h] [symbols=A,B] [date=...] [time=...] - 运行通用模型预测"
+	@echo "  make predict-hist tf=1d date=... [time=...]  - 指定日期历史预测"
 	@echo "  make setup         - 安装依赖"
 	@echo "  make clean         - 清理输出文件"
 
@@ -52,10 +52,10 @@ predict-1h:
 	uv run python predict.py 1h
 
 predict-universal:
-	uv run python predict.py $(if $(tf),$(tf),1h) --model models/universal_pa_smc.joblib $(if $(date),--date "$(date)",) $(if $(symbols),--symbols "$(symbols)",)
+	uv run python predict.py $(if $(tf),$(tf),1h) --model models/universal_pa_smc.joblib $(if $(date),--date "$(date)$(if $(time), $(time),)",) $(if $(symbols),--symbols "$(symbols)",)
 
 predict-hist:
-	uv run python predict.py $(tf) --date "$(date)"
+	uv run python predict.py $(tf) --date "$(date)$(if $(time), $(time),)"
 
 # 环境与清理
 setup:
