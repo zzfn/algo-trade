@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List, Union
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
@@ -32,12 +32,13 @@ class DataProvider:
         
         self.client = StockHistoricalDataClient(self.api_key, self.secret_key)
 
-    def fetch_bars(self, symbol: str, timeframe: TimeFrame, start: datetime, end: Optional[datetime] = None) -> pd.DataFrame:
+    def fetch_bars(self, symbols: Union[str, List[str]], timeframe: TimeFrame, start: datetime, end: Optional[datetime] = None) -> pd.DataFrame:
         """
-        Fetch historical bars for a given symbol.
+        Fetch historical bars for one or multiple symbols.
+        Returns a DataFrame with 'timestamp' and 'symbol' columns.
         """
         request_params = StockBarsRequest(
-            symbol_or_symbols=symbol,
+            symbol_or_symbols=symbols,
             timeframe=timeframe,
             start=start,
             end=end,
@@ -47,12 +48,19 @@ class DataProvider:
         bars = self.client.get_stock_bars(request_params)
         df = bars.df
         
-        # Reset index to have 'timestamp' as a column and remove 'symbol' if it's there
+        # 处理多索引
         if isinstance(df.index, pd.MultiIndex):
             df = df.reset_index()
-            if 'symbol' in df.columns:
-                df = df.drop(columns=['symbol'])
+        else:
+            # 如果是单标的，手动加上 symbol 列保持格式统一
+            df = df.reset_index()
+            if isinstance(symbols, str):
+                df['symbol'] = symbols
         
+        # 确保 timestamp 列是 tz-naive 的，方便后面处理
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
+            
         return df
 
 if __name__ == "__main__":

@@ -8,8 +8,29 @@ class FeatureBuilder:
     def add_all_features(self, df: pd.DataFrame, is_training: bool = True) -> pd.DataFrame:
         """
         Add all technical indicators to the dataframe.
+        Supports multi-symbol DataFrames by grouping by 'symbol'.
         """
         df = df.copy()
+        
+        # 针对每个标的独立计算技术指标
+        df = df.groupby('symbol', group_keys=False).apply(self._add_indicators_per_symbol)
+        
+        if is_training:
+            # 添加截面排名标签 (Cross-sectional Ranking)
+            df = self.add_rank_target(df)
+            df = df.dropna()
+        else:
+            # 预测模式下，只删除特征为 NaN 的行
+            feature_cols = [c for c in df.columns if c not in ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'symbol']]
+            df = df.dropna(subset=feature_cols)
+            
+        return df
+
+    def _add_indicators_per_symbol(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        对单只标的计算所有指标
+        """
+        df = df.sort_values('timestamp')
         df = self.add_returns(df)
         df = self.add_moving_averages(df)
         df = self.add_rsi(df)
@@ -19,22 +40,13 @@ class FeatureBuilder:
         df = self.add_volatility(df)
         df = self.add_price_action(df)
         df = self.add_smc_features(df)
-        
-        if is_training:
-            df = self.add_target(df)
-            # Drop rows with NaN values created by rolling windows and target shift
-            df = df.dropna()
-        else:
-            # For prediction, we only drop rows where features are NaN (initial rolling window)
-            # but keep the very last row even if we don't know the future target
-            feature_cols = [c for c in df.columns if c not in ['timestamp', 'open', 'high', 'low', 'close', 'volume']]
-            df = df.dropna(subset=feature_cols)
-            
         return df
 
     def add_returns(self, df: pd.DataFrame) -> pd.DataFrame:
         df['return_1d'] = df['close'].pct_change(1)
         df['return_5d'] = df['close'].pct_change(5)
+        # 为 Ranking 准备：下一期的实际收益率
+        df['target_return'] = df['close'].pct_change().shift(-1)
         return df
 
     def add_moving_averages(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -48,7 +60,7 @@ class FeatureBuilder:
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
         
-        rs = gain / loss
+        rs = gain / (loss + 1e-9)
         df['rsi'] = 100 - (100 / (1 + rs))
         return df
 
@@ -65,13 +77,13 @@ class FeatureBuilder:
         std = df['close'].rolling(window=period).std()
         df['bb_upper'] = sma + (std * 2)
         df['bb_lower'] = sma - (std * 2)
-        df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / sma
+        df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / (sma + 1e-9)
         return df
 
     def add_volume_features(self, df: pd.DataFrame) -> pd.DataFrame:
         df['volume_change'] = df['volume'].pct_change()
         df['volume_ma_5'] = df['volume'].rolling(window=5).mean()
-        df['volume_ratio'] = df['volume'] / df['volume_ma_5']
+        df['volume_ratio'] = df['volume'] / (df['volume_ma_5'] + 1e-9)
         return df
 
     def add_volatility(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -79,64 +91,51 @@ class FeatureBuilder:
         return df
 
     def add_price_action(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        价格行为学因子 (Price Action)
-        """
         df['body_size'] = (df['close'] - df['open']).abs()
         df['candle_range'] = df['high'] - df['low']
-        
-        # 影线比例
         df['upper_wick'] = df['high'] - df[['open', 'close']].max(axis=1)
         df['lower_wick'] = df[['open', 'close']].min(axis=1) - df['low']
         df['wick_ratio'] = (df['upper_wick'] + df['lower_wick']) / (df['candle_range'] + 1e-6)
-        
-        # 常见形态识别
-        # Pin Bar: 影线长度至少是实体的 2 倍
         df['is_pin_bar'] = ((df['upper_wick'] > df['body_size'] * 2) | 
                             (df['lower_wick'] > df['body_size'] * 2)).astype(int)
-        
-        # 吞没形态 (Engulfing)
         df['is_engulfing'] = ((df['body_size'] > df['body_size'].shift(1)) & 
                               (df['close'].pct_change() * df['close'].shift(1).pct_change() < 0)).astype(int)
         return df
 
     def add_smc_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        聪明钱概念因子 (Smart Money Concepts)
-        """
-        # 1. FVG (Fair Value Gap) - 公允价值缺口
-        # 看涨 FVG: 前一根的高点 < 后一根的低点
         df['fvg_up'] = ((df['low'] > df['high'].shift(2))).astype(int)
-        # 看跌 FVG: 前一根的低点 > 后一根的高点
         df['fvg_down'] = ((df['high'] < df['low'].shift(2))).astype(int)
-        
-        # 2. Displacement (位移/强势波动)
-        # 如果当前波动范围超过过去 20 根平均波动范围的 2 倍，视为位移
         df['atr_sim'] = df['candle_range'].rolling(window=20).mean()
         df['displacement'] = (df['candle_range'] > df['atr_sim'] * 2).astype(int)
-        
         return df
 
-    def add_target(self, df: pd.DataFrame) -> pd.DataFrame:
+    def add_rank_target(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Target: Predict the sign of the next day's return.
-        1 for Up, 0 for Down.
+        计算截面排名标签。
+        在每一个 timestamp，根据 target_return 对不同 symbol 进行排序。
+        收益率最高的标的分数最高。
         """
-        df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
+        # 注意：这里需要对整个 df 按 timestamp 分组进行排名
+        df['target_rank'] = df.groupby('timestamp')['target_return'].rank(method='first', ascending=True) - 1
         return df
 
 if __name__ == "__main__":
-    # Example usage with dummy data
-    data = {
-        'timestamp': pd.date_range(start='2023-01-01', periods=100),
-        'close': np.random.randn(100).cumsum() + 100,
-        'open': np.random.randn(100).cumsum() + 100,
-        'high': np.random.randn(100).cumsum() + 100,
-        'low': np.random.randn(100).cumsum() + 100,
-        'volume': np.random.randint(1000, 5000, 100)
-    }
+    # Test with multi-symbol dummy data
+    dates = pd.date_range(start='2023-01-01', periods=20)
+    symbols = ['AAPL', 'GOOGL', 'MSFT']
+    data = []
+    for s in symbols:
+        for d in dates:
+            data.append({
+                'timestamp': d,
+                'symbol': s,
+                'open': 100 + np.random.randn(),
+                'high': 105 + np.random.randn(),
+                'low': 95 + np.random.randn(),
+                'close': 100 + np.random.randn(),
+                'volume': 1000 + np.random.randint(0, 500)
+            })
     df = pd.DataFrame(data)
     builder = FeatureBuilder()
-    df_with_features = builder.add_all_features(df)
-    print(df_with_features.head())
-    print(df_with_features.columns)
+    res = builder.add_all_features(df)
+    print(res[['timestamp', 'symbol', 'target_return', 'target_rank']].head(15))

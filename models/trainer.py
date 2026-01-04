@@ -1,87 +1,73 @@
 import lightgbm as lgb
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
 import joblib
-import os
+import pandas as pd
+import numpy as np
+from typing import List, Tuple
 
-class QQQModelTrainer:
-    def __init__(self, model_params=None):
-        self.model_params = model_params or {
-            'objective': 'binary',
-            'metric': 'binary_logloss',
-            'boosting_type': 'gbdt',
-            'num_leaves': 7,             # Reduced for small dataset
-            'learning_rate': 0.01,       # Lower LR for better convergence
-            'feature_fraction': 0.8,
-            'min_child_samples': 20,
-            'verbosity': -1              # Reduce noise
-        }
+class RankingModelTrainer:
+    def __init__(self, model_name: str = "Mag7_Ranker"):
+        self.model_name = model_name
         self.model = None
 
-    def train(self, df: pd.DataFrame, feature_cols: list, target_col: str):
+    def train(self, df: pd.DataFrame, feature_cols: List[str], target_col: str) -> None:
         """
-        Train the LightGBM model.
+        使用 LightGBM Ranker (LambdaRank) 进行模型训练。
+        数据需要按 timestamp 排序，以便正确计算 group。
         """
+        # 1. 确保按时间排序
+        df = df.sort_values('timestamp')
+        
+        # 2. 计算分组 (每秒/每个时间点有多少个标的)
+        groups = df.groupby('timestamp').size().tolist()
+        
+        # 3. 准备数据
         X = df[feature_cols]
         y = df[target_col]
-
-        # 时间序列切分 (目前使用简单切分，实际交易中建议使用 Walk-Forward)
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
-
-        print(f"训练样本数: {len(X_train)}, 测试样本数: {len(X_test)}...")
-
-        self.model = lgb.LGBMClassifier(**self.model_params)
+        
+        # 4. 时间序列划分 (80% 训练, 20% 测试)
+        split_idx = int(len(groups) * 0.8)
+        train_groups = groups[:split_idx]
+        test_groups = groups[split_idx:]
+        
+        train_size = sum(train_groups)
+        
+        X_train, X_test = X.iloc[:train_size], X.iloc[train_size:]
+        y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
+        
+        print(f"正在训练排序模型... 总组数: {len(groups)}, 训练组数: {len(train_groups)}, 测试组数: {len(test_groups)}")
+        
+        # 5. 模型配置
+        self.model = lgb.LGBMRanker(
+            objective="lambdarank",
+            metric="ndcg",
+            num_leaves=31,
+            learning_rate=0.05,
+            n_estimators=100,
+            importance_type='gain',
+            label_gain=np.arange(max(y) + 1).tolist(), # 针对打分的增益设置
+            random_state=42,
+            verbosity=-1
+        )
+        
+        # 6. 执行训练
         self.model.fit(
             X_train, y_train,
+            group=train_groups,
             eval_set=[(X_test, y_test)],
-            eval_metric='binary_logloss',
-            # early_stopping_rounds=10 # Deprecated in newer versions, use callback if needed
+            eval_group=[test_groups],
+            eval_at=[1, 3] # 关注前 1 名和前 3 名的排序情况
         )
-
-        # 评估
-        y_pred = self.model.predict(X_test)
-        acc = accuracy_score(y_test, y_pred)
-        report_dict = classification_report(y_test, y_pred, output_dict=True)
         
-        print(f"准确率 (Accuracy): {acc:.4f}")
-        print("\n" + "="*50)
-        print(f"{'类别':<10} | {'精确率':<10} | {'召回率':<10} | {'F1分数':<10} | {'样本量':<10}")
-        print("-" * 50)
-        
-        # 映射类别名称
-        label_map = {'0': '下跌 (0)', '1': '上涨 (1)'}
-        
-        for label, metrics in report_dict.items():
-            if label in label_map:
-                name = label_map[label]
-                print(f"{name:<10} | {metrics['precision']:<12.4f} | {metrics['recall']:<12.4f} | {metrics['f1-score']:<12.4f} | {metrics['support']:<10}")
-            elif label == 'accuracy':
-                pass # 已打印
-            elif label == 'macro avg':
-                print("-" * 50)
-                print(f"{'宏平均':<10} | {metrics['precision']:<12.4f} | {metrics['recall']:<12.4f} | {metrics['f1-score']:<12.4f} | {metrics['support']:<10}")
-            elif label == 'weighted avg':
-                print(f"{'加权平均':<10} | {metrics['precision']:<12.4f} | {metrics['recall']:<12.4f} | {metrics['f1-score']:<12.4f} | {metrics['support']:<10}")
-        print("="*50 + "\n")
+        print("模型训练完成。")
 
-        return acc
-
-    def save_model(self, filepath: str):
+    def save_model(self, path: str) -> None:
         if self.model:
-            import joblib
-            joblib.dump(self.model, filepath)
-            print(f"模型已保存至 {filepath}")
+            joblib.dump(self.model, path)
+            print(f"模型已保存至 {path}")
         else:
-            print("没有可保存的模型。")
+            print("错误: 没有可保存的模型。")
 
-if __name__ == "__main__":
-    # Example usage with dummy data
-    import numpy as np
-    data = np.random.rand(100, 5)
-    target = np.random.randint(0, 2, 100)
-    df = pd.DataFrame(data, columns=[f'feat_{i}' for i in range(5)])
-    df['target'] = target
-    
-    trainer = QQQModelTrainer()
-    trainer.train(df, [f'feat_{i}' for i in range(5)], 'target')
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        if self.model:
+            return self.model.predict(X)
+        return np.array([])
