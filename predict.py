@@ -15,8 +15,9 @@ load_dotenv()
 def run_prediction():
     # 使用 argparse 处理命令行参数
     parser = argparse.ArgumentParser(description="Mag7 + 指数 排序预测工具")
-    parser.add_argument("timeframe", nargs="?", default="1d", help="预测周期 (如 1d, 15m, 1h)")
+    parser.add_argument("timeframe", nargs="?", default="1h", help="预测周期 (如 1d, 15m, 1h)")
     parser.add_argument("--date", help="指定历史分析日期 (格式: YYYY-MM-DD 或 'YYYY-MM-DD HH:MM:SS')")
+    parser.add_argument("--model", help="指定模型文件路径")
     
     args = parser.parse_args()
     
@@ -37,11 +38,15 @@ def run_prediction():
     else:
         timeframe = TimeFrame.Day
 
-    model_path = f"output/mag7_{tf_str}_ranker.joblib"
+    if args.model:
+        model_path = args.model
+    else:
+        model_path = f"output/mag7_{tf_str}_ranker.joblib"
     
     if not os.path.exists(model_path):
         print(f"错误: 找不到模型文件 {model_path}。")
-        print(f"请先运行训练命令 (例如: make train-{tf_str})")
+        if not args.model:
+            print(f"请先运行训练命令 (例如: make train-{tf_str})")
         return
 
     # 1. 确定时间范围
@@ -66,7 +71,8 @@ def run_prediction():
         start_date = end_date - timedelta(days=60)
         prediction_mode_desc = "最新实时数据分析"
 
-    print(f"正在获取 {len(symbols)} 个标的 ({tf_str}) 数据进行预测 ({prediction_mode_desc})...")
+    print(f"正在获取 {len(symbols)} 个标的 ({tf_str}) 数据进行预测 (时间标准: 美东时间 ET)...")
+    print(f"分析模式: {prediction_mode_desc}")
     
     try:
         provider = DataProvider()
@@ -102,14 +108,26 @@ def run_prediction():
         model = joblib.load(model_path)
         
         # 5. 定义特征列 (必须与训练时一致)
-        feature_cols = [
-            'return_1d', 'return_5d', 'ma_5', 'ma_20', 
-            'ma_ratio', 'rsi', 'volatility_20d',
-            'macd', 'macd_signal', 'macd_hist',
-            'bb_width', 'volume_ratio', 'volume_change',
-            'wick_ratio', 'is_pin_bar', 'is_engulfing',
-            'fvg_up', 'fvg_down', 'displacement'
-        ]
+        # 如果是通用模型，使用全量特征
+        if "universal" in model_path.lower():
+            feature_cols = [
+                'return_1d', 'return_5d', 'ma_5_rel', 'ma_20_rel', 'ma_ratio', 'rsi', 
+                'macd_rel', 'macd_signal_rel', 'macd_hist_rel', 'bb_upper_rel', 
+                'bb_lower_rel', 'bb_width', 'volume_change', 'volume_ma_5', 
+                'volume_ratio', 'volatility_20d', 'body_size_rel', 'candle_range_rel', 
+                'upper_wick_rel', 'lower_wick_rel', 'wick_ratio', 'is_pin_bar', 
+                'is_engulfing', 'swing_high', 'swing_low', 'bos_up', 'bos_down', 
+                'fvg_up', 'fvg_down', 'fvg_size_rel', 'displacement', 'ob_bullish', 'ob_bearish'
+            ]
+        else:
+            feature_cols = [
+                'return_1d', 'return_5d', 'ma_5', 'ma_20', 
+                'ma_ratio', 'rsi', 'volatility_20d',
+                'macd', 'macd_signal', 'macd_hist',
+                'bb_width', 'volume_ratio', 'volume_change',
+                'wick_ratio', 'is_pin_bar', 'is_engulfing',
+                'fvg_up', 'fvg_down', 'displacement'
+            ]
         
         # 6. 执行预测 (评分)
         latest_data['score'] = model.predict(latest_data[feature_cols])
@@ -118,7 +136,7 @@ def run_prediction():
         results = latest_data[['symbol', 'close', 'score']].sort_values('score', ascending=False)
         
         print("\n" + "="*50)
-        print(f"Mag7 排序预测分析 ({tf_str})")
+        print(f"Mag7 排序预测分析 ({tf_str}) - 美东时间 (ET)")
         print(f"分析时刻: {analysis_time}")
         print("-" * 50)
         print(f"{'代码':<8} | {'收盘价格':<10} | {'预测得分':<10}")

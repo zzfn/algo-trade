@@ -57,9 +57,12 @@ class DataProvider:
             if isinstance(symbols, str):
                 df['symbol'] = symbols
         
-        # 确保 timestamp 列是 tz-naive 的，方便后面处理
+        # 确保 timestamp 列转换为美东时间 (America/New_York)
         if 'timestamp' in df.columns:
-            df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
+            # 1. 转换为 DatetimeIndex (如果不是的话)
+            # 2. 转换时区从 UTC 处理为 America/New_York
+            # 3. 再转换为 Naive (tz-naive)，方便代码内部统一比较
+            df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_convert('America/New_York').dt.tz_localize(None)
             
         return df
 

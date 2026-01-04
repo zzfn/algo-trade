@@ -14,9 +14,10 @@ load_dotenv()
 
 def run_backtest():
     parser = argparse.ArgumentParser(description="Mag7 + 指数 排序策略回测工具")
-    parser.add_argument("timeframe", nargs="?", default="1d", help="回测周期 (如 1d, 15m, 1h)")
+    parser.add_argument("timeframe", nargs="?", default="1h", help="回测周期 (如 1d, 15m, 1h)")
     parser.add_argument("--days", type=int, default=365, help="回测天数 (默认 365 天)")
     parser.add_argument("--top_n", type=int, default=1, help="每天选取排名最高的前 N 个标的")
+    parser.add_argument("--model", help="指定模型文件路径")
     
     args = parser.parse_args()
     
@@ -37,13 +38,19 @@ def run_backtest():
     else:
         timeframe = TimeFrame.Day
 
-    model_path = f"output/mag7_{tf_str}_ranker.joblib"
+    if args.model:
+        model_path = args.model
+    else:
+        model_path = f"output/mag7_{tf_str}_ranker.joblib"
     
     if not os.path.exists(model_path):
-        print(f"错误: 找不到模型文件 {model_path}。请先运行: python main.py {tf_str}")
+        print(f"错误: 找不到模型文件 {model_path}。")
+        if not args.model:
+            print(f"请先运行训练命令 (例如: make train-{tf_str})")
         return
 
-    print(f"开始对 {len(symbols)} 个标的进行排序回测 (过去 {args.days} 天, Top {args.top_n})...")
+    print(f"开始对 {len(symbols)} 个标的进行排序回测 (时间标准: 美东时间 ET)...")
+    print(f"配置: 过去 {args.days} 天, Top {args.top_n}")
     
     try:
         # 1. 获取数据
@@ -74,14 +81,25 @@ def run_backtest():
         model = joblib.load(model_path)
         
         # 4. 特征列
-        feature_cols = [
-            'return_1d', 'return_5d', 'ma_5', 'ma_20', 
-            'ma_ratio', 'rsi', 'volatility_20d',
-            'macd', 'macd_signal', 'macd_hist',
-            'bb_width', 'volume_ratio', 'volume_change',
-            'wick_ratio', 'is_pin_bar', 'is_engulfing',
-            'fvg_up', 'fvg_down', 'displacement'
-        ]
+        if "universal" in model_path.lower():
+            feature_cols = [
+                'return_1d', 'return_5d', 'ma_5_rel', 'ma_20_rel', 'ma_ratio', 'rsi', 
+                'macd_rel', 'macd_signal_rel', 'macd_hist_rel', 'bb_upper_rel', 
+                'bb_lower_rel', 'bb_width', 'volume_change', 'volume_ma_5', 
+                'volume_ratio', 'volatility_20d', 'body_size_rel', 'candle_range_rel', 
+                'upper_wick_rel', 'lower_wick_rel', 'wick_ratio', 'is_pin_bar', 
+                'is_engulfing', 'swing_high', 'swing_low', 'bos_up', 'bos_down', 
+                'fvg_up', 'fvg_down', 'fvg_size_rel', 'displacement', 'ob_bullish', 'ob_bearish'
+            ]
+        else:
+            feature_cols = [
+                'return_1d', 'return_5d', 'ma_5', 'ma_20', 
+                'ma_ratio', 'rsi', 'volatility_20d',
+                'macd', 'macd_signal', 'macd_hist',
+                'bb_width', 'volume_ratio', 'volume_change',
+                'wick_ratio', 'is_pin_bar', 'is_engulfing',
+                'fvg_up', 'fvg_down', 'displacement'
+            ]
         
         # 5. 执行预测 (获取得分)
         df_test['score'] = model.predict(df_test[feature_cols])
@@ -128,7 +146,7 @@ def run_backtest():
         mdd = dd.min()
 
         print("\n" + "="*50)
-        print(f"排序策略回测报告: {tf_str} (Top {args.top_n})")
+        print(f"排序策略回测报告: {tf_str} (Top {args.top_n}) - ET")
         print(f"时间范围: {cum_strategy.index[0]} 至 {cum_strategy.index[-1]}")
         print(f"总周期数: {len(cum_strategy)}")
         print("-" * 50)

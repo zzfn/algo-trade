@@ -36,8 +36,9 @@ class FeatureBuilder:
         """
         对单只标的计算所有指标
         """
-        # 注意：由于使用了 include_groups=False，df 此时不包含 'symbol' 列
         df = df.sort_values('timestamp')
+        df['atr'] = self._calculate_atr(df) # 用于归一化
+        
         df = self.add_returns(df)
         df = self.add_moving_averages(df)
         df = self.add_rsi(df)
@@ -49,42 +50,48 @@ class FeatureBuilder:
         df = self.add_smc_features(df)
         return df
 
+    def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
+        high_low = df['high'] - df['low']
+        high_close = (df['high'] - df['close'].shift()).abs()
+        low_close = (df['low'] - df['close'].shift()).abs()
+        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        return tr.rolling(window=period).mean()
+
     def add_returns(self, df: pd.DataFrame) -> pd.DataFrame:
         df['return_1d'] = df['close'].pct_change(1)
         df['return_5d'] = df['close'].pct_change(5)
-        # 为 Ranking 准备：下一期的实际收益率
         df['target_return'] = df['close'].pct_change().shift(-1)
         return df
 
     def add_moving_averages(self, df: pd.DataFrame) -> pd.DataFrame:
-        df['ma_5'] = df['close'].rolling(window=5).mean()
-        df['ma_20'] = df['close'].rolling(window=20).mean()
-        df['ma_ratio'] = df['ma_5'] / df['ma_20']
+        df['ma_5_rel'] = (df['close'].rolling(window=5).mean() / df['close']) - 1
+        df['ma_20_rel'] = (df['close'].rolling(window=20).mean() / df['close']) - 1
+        df['ma_ratio'] = (df['ma_5_rel'] + 1) / (df['ma_20_rel'] + 1)
         return df
 
     def add_rsi(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        
         rs = gain / (loss + 1e-9)
-        df['rsi'] = 100 - (100 / (1 + rs))
+        df['rsi'] = (100 - (100 / (1 + rs))) / 100 # 归一化到 0-1
         return df
 
     def add_macd(self, df: pd.DataFrame) -> pd.DataFrame:
         exp1 = df['close'].ewm(span=12, adjust=False).mean()
         exp2 = df['close'].ewm(span=26, adjust=False).mean()
-        df['macd'] = exp1 - exp2
-        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
-        df['macd_hist'] = df['macd'] - df['macd_signal']
+        # MACD 归一化为价格的百分比
+        df['macd_rel'] = (exp1 - exp2) / df['close']
+        df['macd_signal_rel'] = df['macd_rel'].ewm(span=9, adjust=False).mean()
+        df['macd_hist_rel'] = df['macd_rel'] - df['macd_signal_rel']
         return df
 
     def add_bollinger_bands(self, df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
         sma = df['close'].rolling(window=period).mean()
         std = df['close'].rolling(window=period).std()
-        df['bb_upper'] = sma + (std * 2)
-        df['bb_lower'] = sma - (std * 2)
-        df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / (sma + 1e-9)
+        df['bb_upper_rel'] = (sma + (std * 2)) / df['close'] - 1
+        df['bb_lower_rel'] = (sma - (std * 2)) / df['close'] - 1
+        df['bb_width'] = (2 * 2 * std) / (sma + 1e-9)
         return df
 
     def add_volume_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -98,31 +105,55 @@ class FeatureBuilder:
         return df
 
     def add_price_action(self, df: pd.DataFrame) -> pd.DataFrame:
-        df['body_size'] = (df['close'] - df['open']).abs()
-        df['candle_range'] = df['high'] - df['low']
-        df['upper_wick'] = df['high'] - df[['open', 'close']].max(axis=1)
-        df['lower_wick'] = df[['open', 'close']].min(axis=1) - df['low']
-        df['wick_ratio'] = (df['upper_wick'] + df['lower_wick']) / (df['candle_range'] + 1e-6)
-        df['is_pin_bar'] = ((df['upper_wick'] > df['body_size'] * 2) | 
-                            (df['lower_wick'] > df['body_size'] * 2)).astype(int)
-        df['is_engulfing'] = ((df['body_size'] > df['body_size'].shift(1)) & 
+        # candle range 归一化
+        atr = df['atr'] + 1e-9
+        df['body_size_rel'] = (df['close'] - df['open']).abs() / atr
+        df['candle_range_rel'] = (df['high'] - df['low']) / atr
+        df['upper_wick_rel'] = (df['high'] - df[['open', 'close']].max(axis=1)) / atr
+        df['lower_wick_rel'] = (df[['open', 'close']].min(axis=1) - df['low']) / atr
+        df['wick_ratio'] = (df['upper_wick_rel'] + df['lower_wick_rel']) / (df['candle_range_rel'] + 1e-6)
+        df['is_pin_bar'] = ((df['upper_wick_rel'] > df['body_size_rel'] * 2) | 
+                            (df['lower_wick_rel'] > df['body_size_rel'] * 2)).astype(int)
+        df['is_engulfing'] = ((df['body_size_rel'] > df['body_size_rel'].shift(1)) & 
                               (df['close'].pct_change() * df['close'].shift(1).pct_change() < 0)).astype(int)
         return df
 
     def add_smc_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        df['fvg_up'] = ((df['low'] > df['high'].shift(2))).astype(int)
-        df['fvg_down'] = ((df['high'] < df['low'].shift(2))).astype(int)
-        df['atr_sim'] = df['candle_range'].rolling(window=20).mean()
-        df['displacement'] = (df['candle_range'] > df['atr_sim'] * 2).astype(int)
+        """
+        Advanced Smart Money Concepts features.
+        """
+        atr = df['atr'] + 1e-9
+        # 1. Swing Highs and Lows (Fractals)
+        window = 3
+        df['swing_high'] = (df['high'] == df['high'].rolling(window=window*2+1, center=True).max()).astype(int)
+        df['swing_low'] = (df['low'] == df['low'].rolling(window=window*2+1, center=True).min()).astype(int)
+        
+        # 2. Market Structure (BOS / CHoCH)
+        last_h = df['high'].where(df['swing_high'] == 1).ffill()
+        last_l = df['low'].where(df['swing_low'] == 1).ffill()
+        
+        df['bos_up'] = ((df['close'] > last_h.shift(1)) & (df['high'] != last_h)).astype(int)
+        df['bos_down'] = ((df['close'] < last_l.shift(1)) & (df['low'] != last_l)).astype(int)
+        
+        # 3. Fair Value Gaps (FVG) - 归一化大小
+        df['fvg_up'] = ((df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])).astype(int)
+        df['fvg_down'] = ((df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])).astype(int)
+        df['fvg_size_rel'] = df.apply(lambda x: (x['low'] - df.loc[x.name-2, 'high']) if x['fvg_up'] else 
+                                     (df.loc[x.name-2, 'low'] - x['high']) if x['fvg_down'] else 0, axis=1) / atr
+        
+        # 4. Displacement
+        df['displacement'] = ( (df['high'] - df['low']) > atr * 1.5).astype(int)
+        
+        # 5. Order Blocks (OB)
+        df['ob_bullish'] = ((df['displacement'] == 1) & (df['close'] > df['open']) & (df['close'].shift(1) < df['open'].shift(1))).astype(int)
+        df['ob_bearish'] = ((df['displacement'] == 1) & (df['close'] < df['open']) & (df['close'].shift(1) > df['open'].shift(1))).astype(int)
+        
         return df
 
     def add_rank_target(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         计算截面排名标签。
-        在每一个 timestamp，根据 target_return 对不同 symbol 进行排序。
-        收益率最高的标的分数最高。
         """
-        # 注意：这里需要对整个 df 按 timestamp 分组进行排名
         df['target_rank'] = df.groupby('timestamp')['target_return'].rank(method='first', ascending=True) - 1
         return df
 
