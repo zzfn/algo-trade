@@ -42,7 +42,7 @@ backtest-15m:
 	uv run python backtest.py 15m --days 30 --top_n 1
 
 backtest-universal:
-	uv run python backtest.py $(if $(tf),$(tf),1h) --days $(if $(days),$(days),90) --top_n 1 --model models/universal_pa_smc.joblib
+	uv run python backtest.py $(if $(tf),$(tf),1h) --days $(if $(days),$(days),90) --top_n 1 --model models/universal_pa_smc.joblib $(if $(details),--details,)
 
 # 预测命令
 predict-1d:

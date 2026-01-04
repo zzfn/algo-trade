@@ -18,6 +18,7 @@ def run_backtest():
     parser.add_argument("--days", type=int, default=365, help="回测天数 (默认 365 天)")
     parser.add_argument("--top_n", type=int, default=1, help="每天选取排名最高的前 N 个标的")
     parser.add_argument("--model", help="指定模型文件路径")
+    parser.add_argument("--details", action="store_true", help="打印详细交易记录")
     
     args = parser.parse_args()
     
@@ -126,7 +127,18 @@ def run_backtest():
         # 7. 计算每日策略总收益
         strategy_daily = df_test[df_test['is_selected'] == 1].groupby('timestamp')['target_return'].mean().fillna(0)
         
-        # 8. 基准收益 (SPY 和 QQQ)
+        # 8. 打印交易细节 (如果启用)
+        if args.details:
+            print("\n" + "-"*80)
+            print(f"{'时间 (ET)':<20} | {'代码':<8} | {'收盘价':<10} | {'预测分':<10} | {'下期收益':<10}")
+            print("-"*80)
+            # 获取所有被选中的行
+            selected_trades = df_test[df_test['is_selected'] == 1].sort_values('timestamp')
+            for _, row in selected_trades.iterrows():
+                print(f"{str(row['timestamp']):<20} | {row['symbol']:<8} | {row['close']:<10.2f} | {row['score']:<10.4f} | {row['target_return']:+10.2%}")
+            print("-"*80 + "\n")
+
+        # 9. 基准收益 (SPY 和 QQQ)
         spy_returns = df_test[df_test['symbol'] == 'SPY'].set_index('timestamp')['target_return']
         qqq_returns = df_test[df_test['symbol'] == 'QQQ'].set_index('timestamp')['target_return']
         
