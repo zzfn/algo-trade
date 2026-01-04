@@ -13,21 +13,21 @@ help:
 
 # 训练命令
 train-l1:
-	uv run python scripts/train_l1.py
+	PYTHONPATH=. uv run python scripts/train_l1.py
 
 train-l2:
-	uv run python scripts/train_l2.py
+	PYTHONPATH=. uv run python scripts/train_l2.py
 
 train-l3:
-	uv run python scripts/train_l3.py
+	PYTHONPATH=. uv run python scripts/train_l3.py
 
 # 预测命令
 predict:
-	uv run python predict.py
+	PYTHONPATH=. uv run python predict.py
 
 # 回测命令 (保留通用回测脚本支持)
 backtest:
-	uv run python scripts/backtest.py $(if $(tf),$(tf),1h) --days $(if $(days),$(days),90) --top_n 1 --model $(if $(model),$(model),models/artifacts/l2_stock_selection.joblib)
+	PYTHONPATH=. uv run python scripts/backtest.py $(if $(tf),$(tf),1h) --days $(if $(days),$(days),90) --top_n 1 --model $(if $(model),$(model),models/artifacts/l2_stock_selection.joblib)
 
 # 环境与清理
 setup:
