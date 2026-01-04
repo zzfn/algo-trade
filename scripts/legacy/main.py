@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from data.provider import DataProvider
-from features.builder import FeatureBuilder
+from features.technical import FeatureBuilder
 from models.trainer import RankingModelTrainer
 
 # 加载环境变量

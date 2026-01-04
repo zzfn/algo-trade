@@ -1,7 +1,7 @@
 import pandas as pd
 from datetime import datetime, timedelta
 from data.provider import DataProvider
-from features.builder import FeatureBuilder
+from features.technical import FeatureBuilder
 from models.trainer import RankingModelTrainer
 from alpaca.data.timeframe import TimeFrame
 from dotenv import load_dotenv
@@ -40,7 +40,7 @@ def train_l2_model():
     trainer.train(df, feature_cols, 'target_rank')
     
     # 5. 保存
-    trainer.save("models/l2_stock_selection.joblib")
+    trainer.save("models/artifacts/l2_stock_selection.joblib")
     print("L2 Stock Selection model training complete.")
 
 if __name__ == "__main__":

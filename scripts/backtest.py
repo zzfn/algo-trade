@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from data.provider import DataProvider
-from features.builder import FeatureBuilder
+from features.technical import FeatureBuilder
 
 # 加载环境变量
 load_dotenv()
@@ -46,7 +46,7 @@ def run_backtest():
     if args.model:
         model_path = args.model
     else:
-        model_path = f"output/mag7_{tf_str}_ranker.joblib"
+        model_path = f"models/artifacts/mag7_{tf_str}_ranker.joblib"
     
     if not os.path.exists(model_path):
         print(f"错误: 找不到模型文件 {model_path}。")

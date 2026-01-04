@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from alpaca.data.timeframe import TimeFrame
 from data.provider import DataProvider
-from features.builder import FeatureBuilder
+from features.technical import FeatureBuilder
 from models.trainer import SignalClassifierTrainer
 
 def main():

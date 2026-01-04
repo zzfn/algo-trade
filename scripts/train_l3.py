@@ -1,7 +1,7 @@
 import pandas as pd
 from datetime import datetime, timedelta
 from data.provider import DataProvider
-from features.builder import FeatureBuilder
+from features.technical import FeatureBuilder
 from models.trainer import SignalClassifierTrainer
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
@@ -41,7 +41,7 @@ def train_l3_model():
     trainer.train(df, feature_cols, 'target_signal')
     
     # 5. 保存
-    trainer.save("models/l3_execution.joblib")
+    trainer.save("models/artifacts/l3_execution.joblib")
     print("L3 Execution model training complete.")
 
 if __name__ == "__main__":

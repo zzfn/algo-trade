@@ -1,7 +1,7 @@
 import pandas as pd
 from datetime import datetime, timedelta
 from data.provider import DataProvider
-from features.l1_builder import L1FeatureBuilder
+from features.macro import L1FeatureBuilder
 from models.trainer import SklearnClassifierTrainer
 from alpaca.data.timeframe import TimeFrame
 from dotenv import load_dotenv
@@ -37,7 +37,7 @@ def train_l1_model():
     trainer.train(df_l1, feature_cols, target_col)
     
     # 4. 保存
-    trainer.save("models/l1_market_timing.joblib")
+    trainer.save("models/artifacts/l1_market_timing.joblib")
     print("L1 Market Timing model training complete.")
 
 if __name__ == "__main__":
