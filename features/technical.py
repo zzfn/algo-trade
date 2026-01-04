@@ -221,6 +221,54 @@ class FeatureBuilder:
         df = pd.concat([df, shakeouts], axis=1)
         return df
 
+    def add_risk_targets(self, df: pd.DataFrame, horizon: int = 20) -> pd.DataFrame:
+        """
+        基于 SMC 概念计算止盈止损目标 (用于 L4 风控模型训练)。
+        
+        参数:
+            horizon: 未来观察周期数
+            
+        返回:
+            添加了以下列的 DataFrame:
+            - target_tp_long_pct: 做多止盈目标 (百分比)
+            - target_sl_long_pct: 做多止损目标 (百分比,负值)
+            - target_tp_short_pct: 做空止盈目标 (百分比,负值)
+            - target_sl_short_pct: 做空止损目标 (百分比,正值)
+        """
+        def calculate_risk_targets(group):
+            # 1. 识别最近的 Swing High/Low (支撑阻力位)
+            nearest_resistance = group['high'].where(group['swing_high'] == 1).ffill()
+            nearest_support = group['low'].where(group['swing_low'] == 1).ffill()
+            
+            # 2. 计算未来实际触及的最高/最低点
+            future_high = group['high'].shift(-1).rolling(window=horizon, min_periods=1).max()
+            future_low = group['low'].shift(-1).rolling(window=horizon, min_periods=1).min()
+            
+            current_price = group['close']
+            
+            # 3. 做多止盈目标: 未来最高点,但参考阻力位
+            actual_gain = (future_high / current_price - 1)
+            resistance_limit = (nearest_resistance * 1.5 / current_price - 1)
+            group['target_tp_long_pct'] = np.minimum(actual_gain, resistance_limit)
+            
+            # 4. 做多止损目标: 未来最低点,参考支撑位
+            actual_loss = (future_low / current_price - 1)
+            support_limit = (nearest_support * 0.95 / current_price - 1)
+            group['target_sl_long_pct'] = np.maximum(actual_loss, support_limit)
+            
+            # 5. 做空止盈目标: 未来最低点 (做空盈利 = 价格下跌)
+            group['target_tp_short_pct'] = -actual_gain
+            
+            # 6. 做空止损目标: 未来最高点 (做空亏损 = 价格上涨)
+            group['target_sl_short_pct'] = -actual_loss
+            
+            return group
+        
+        # 按 symbol 分组计算
+        df = df.groupby('symbol', group_keys=False).apply(calculate_risk_targets, include_groups=False)
+        
+        return df
+
 
 if __name__ == "__main__":
     # Test with multi-symbol dummy data

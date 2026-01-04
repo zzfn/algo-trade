@@ -64,21 +64,28 @@ def run_hierarchical_prediction():
     last_h_ts = df_l2_feats[df_l2_feats['is_complete']]['timestamp'].max()
     l2_latest = df_l2_feats[df_l2_feats['timestamp'] == last_h_ts].copy()
     
-    # L2 特征排除 (不包括洗盘信号，因为 L2 训练时还没加)
     l2_exclude = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 
                   'target_return', 'target_rank', 'atr', 'vwap', 'trade_count', 
-                  'max_future_return', 'target_signal', 'local_high', 'local_low', 'is_complete',
-                  'shakeout_bull', 'shakeout_bear']
+                  'max_future_return', 'target_signal', 'local_high', 'local_low', 'is_complete']
     l2_features = [c for c in l2_latest.columns if c not in l2_exclude]
     
     l2_latest['rank_score'] = l2_model.predict(l2_latest[l2_features])
     top_stocks = l2_latest.sort_values('rank_score', ascending=False).head(3)
+    bottom_stocks = l2_latest.sort_values('rank_score', ascending=True).head(3)
     
     print(f"🕒 基于 K 线时刻: {last_h_ts}")
     print("-" * 50)
+    print("📈 做多建议 (Top 3):")
     print(f"{'排名':<4} | {'代码':<8} | {'价格':<10} | {'相对强度得分'}")
     print("-" * 50)
     for i, (_, row) in enumerate(top_stocks.iterrows()):
+        print(f"{i+1:<4} | {row['symbol']:<8} | {row['close']:<10.2f} | {row['rank_score']:.4f}")
+    
+    print("\n" + "-" * 50)
+    print("📉 做空建议 (Bottom 3):")
+    print(f"{'排名':<4} | {'代码':<8} | {'价格':<10} | {'相对强度得分'}")
+    print("-" * 50)
+    for i, (_, row) in enumerate(bottom_stocks.iterrows()):
         print(f"{i+1:<4} | {row['symbol']:<8} | {row['close']:<10.2f} | {row['rank_score']:.4f}")
     
     # ---------------------------------------------------------
@@ -122,11 +129,19 @@ def run_hierarchical_prediction():
     
     print("\n" + "="*70)
     print("分析总结: ", end="")
-    best_candidate = l3_latest.sort_values('long_p', ascending=False).iloc[0]
-    if is_safe and best_candidate['long_p'] > 0.45:
-        print(f"🚀 核心推荐 [{best_candidate['symbol']}] 做多。")
+    best_long = l3_latest.sort_values('long_p', ascending=False).iloc[0]
+    best_short = l3_latest.sort_values('short_p', ascending=False).iloc[0]
+    
+    recommendations = []
+    if is_safe and best_long['long_p'] > 0.45:
+        recommendations.append(f"🚀 做多 [{best_long['symbol']}] (置信度: {best_long['long_p']:.1%})")
+    if best_short['short_p'] > 0.45:
+        recommendations.append(f"� 做空 [{best_short['symbol']}] (置信度: {best_short['short_p']:.1%})")
+    
+    if recommendations:
+        print(" | ".join(recommendations))
     else:
-        print("💡 当前无高置信度入场信号，建议等待或关注洗盘反抽。")
+        print("💡 当前无高置信度入场信号,建议等待或关注洗盘反抽。")
     print("="*70 + "\n")
 
 if __name__ == "__main__":

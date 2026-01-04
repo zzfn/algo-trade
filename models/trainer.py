@@ -177,3 +177,82 @@ class SklearnClassifierTrainer:
         if self.model:
             return self.model.predict_proba(X)
         return np.array([])
+
+class RiskModelTrainer:
+    """
+    L4 风控模型训练器 - 用于预测止盈止损点位
+    """
+    def __init__(self):
+        self.models = {}
+    
+    def train(self, df: pd.DataFrame, feature_cols: List[str], target_col: str, model_name: str) -> None:
+        """
+        训练单个风控回归模型
+        
+        参数:
+            df: 训练数据
+            feature_cols: 特征列
+            target_col: 目标列 (止盈/止损百分比)
+            model_name: 模型名称 (tp_long, sl_long, tp_short, sl_short)
+        """
+        # 1. 准备数据
+        X = df[feature_cols]
+        y = df[target_col]
+        
+        # 2. 时间序列划分
+        split_idx = int(len(df) * 0.8)
+        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+        
+        print(f"Training {model_name} model... Samples: {len(X_train)} train, {len(X_test)} test")
+        print(f"Target range: [{y_train.min():.2%}, {y_train.max():.2%}]")
+        
+        # 3. 模型配置
+        model = lgb.LGBMRegressor(
+            objective='regression',
+            metric='rmse',
+            num_leaves=31,
+            learning_rate=0.05,
+            n_estimators=150,
+            random_state=42,
+            verbosity=-1
+        )
+        
+        # 4. 训练
+        model.fit(
+            X_train, y_train,
+            eval_set=[(X_test, y_test)],
+            callbacks=[lgb.early_stopping(stopping_rounds=20, verbose=False)]
+        )
+        
+        # 5. 评估
+        train_pred = model.predict(X_train)
+        test_pred = model.predict(X_test)
+        
+        train_rmse = np.sqrt(np.mean((y_train - train_pred) ** 2))
+        test_rmse = np.sqrt(np.mean((y_test - test_pred) ** 2))
+        
+        print(f"  Train RMSE: {train_rmse:.4f} | Test RMSE: {test_rmse:.4f}")
+        
+        self.models[model_name] = model
+    
+    def save(self, path: str) -> None:
+        """保存当前训练的模型"""
+        if self.models:
+            # 只保存最后一个训练的模型
+            model_name = list(self.models.keys())[-1]
+            joblib.dump(self.models[model_name], path)
+            print(f"Model saved to {path}")
+    
+    def load(self, path: str, model_name: str):
+        """加载模型"""
+        model = joblib.load(path)
+        self.models[model_name] = model
+        print(f"Model loaded from {path}")
+        return model
+    
+    def predict(self, X: pd.DataFrame, model_name: str) -> np.ndarray:
+        """预测"""
+        if model_name in self.models:
+            return self.models[model_name].predict(X)
+        return np.array([])
