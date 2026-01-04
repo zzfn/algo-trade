@@ -62,8 +62,8 @@ def run_prediction():
         # is_training=False 
         df_features = builder.add_all_features(df_raw, is_training=False)
         
-        # 每个 symbol 选最后一条记录
-        latest_data = df_features.groupby('symbol').tail(1)
+        # 每个 symbol 选最后一条记录，使用 .copy() 避免 SettingWithCopyWarning
+        latest_data = df_features.groupby('symbol').tail(1).copy()
         
         if latest_data.empty:
             print("错误: 处理后的数据为空。")

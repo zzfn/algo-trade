@@ -90,21 +90,23 @@ def run_backtest():
         # 我们需要计算每个 symbol 的 strategy_return
         # strategy_return = 如果该 symbol 被选中，则为它的下期收益，否则为 0
         
+        # 6. 核心逻辑：每天/每个周期选出 Top N
         def pick_top_n(group):
-            # 给得分打分排名
             group = group.sort_values('score', ascending=False)
             group['is_selected'] = 0
-            # 选出前 N 名
             group.iloc[:args.top_n, group.columns.get_loc('is_selected')] = 1
             return group
 
-        df_test = df_test.groupby('timestamp', group_keys=True).apply(pick_top_n, include_groups=False).reset_index(level=0).reset_index(drop=True)
+        # 使用更稳健的循环方式避免 FutureWarning 和丢失 timestamp
+        processed_ts = []
+        for ts, group in df_test.groupby('timestamp'):
+            processed = pick_top_n(group)
+            processed['timestamp'] = ts
+            processed_ts.append(processed)
+        df_test = pd.concat(processed_ts).reset_index(drop=True)
         
-        # 7. 计算每日策略总收益 (选中的标的收益的平均值)
-        strategy_daily = df_test.groupby('timestamp').apply(
-            lambda x: x[x['is_selected'] == 1]['target_return'].mean(),
-            include_groups=False
-        ).fillna(0) # 如果那天没选出，收益为0
+        # 7. 计算每日策略总收益
+        strategy_daily = df_test[df_test['is_selected'] == 1].groupby('timestamp')['target_return'].mean().fillna(0)
         
         # 8. 基准收益 (SPY 和 QQQ)
         spy_returns = df_test[df_test['symbol'] == 'SPY'].set_index('timestamp')['target_return']

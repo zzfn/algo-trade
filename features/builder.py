@@ -13,7 +13,13 @@ class FeatureBuilder:
         df = df.copy()
         
         # 针对每个标的独立计算技术指标
-        df = df.groupby('symbol', group_keys=True).apply(self._add_indicators_per_symbol, include_groups=False).reset_index(level=0).reset_index(drop=True)
+        processed_groups = []
+        for symbol, group in df.groupby('symbol'):
+            # 排除 symbol 列传给处理函数，处理完后再加回
+            processed = self._add_indicators_per_symbol(group.drop(columns='symbol', errors='ignore'))
+            processed['symbol'] = symbol
+            processed_groups.append(processed)
+        df = pd.concat(processed_groups).reset_index(drop=True)
         
         if is_training:
             # 添加截面排名标签 (Cross-sectional Ranking)
@@ -30,6 +36,7 @@ class FeatureBuilder:
         """
         对单只标的计算所有指标
         """
+        # 注意：由于使用了 include_groups=False，df 此时不包含 'symbol' 列
         df = df.sort_values('timestamp')
         df = self.add_returns(df)
         df = self.add_moving_averages(df)
