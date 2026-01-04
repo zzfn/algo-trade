@@ -13,7 +13,7 @@ class FeatureBuilder:
         df = df.copy()
         
         # 针对每个标的独立计算技术指标
-        df = df.groupby('symbol', group_keys=False).apply(self._add_indicators_per_symbol)
+        df = df.groupby('symbol', group_keys=True).apply(self._add_indicators_per_symbol, include_groups=False).reset_index(level=0).reset_index(drop=True)
         
         if is_training:
             # 添加截面排名标签 (Cross-sectional Ranking)

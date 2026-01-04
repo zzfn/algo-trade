@@ -98,11 +98,12 @@ def run_backtest():
             group.iloc[:args.top_n, group.columns.get_loc('is_selected')] = 1
             return group
 
-        df_test = df_test.groupby('timestamp', group_keys=False).apply(pick_top_n)
+        df_test = df_test.groupby('timestamp', group_keys=True).apply(pick_top_n, include_groups=False).reset_index(level=0).reset_index(drop=True)
         
         # 7. 计算每日策略总收益 (选中的标的收益的平均值)
         strategy_daily = df_test.groupby('timestamp').apply(
-            lambda x: x[x['is_selected'] == 1]['target_return'].mean()
+            lambda x: x[x['is_selected'] == 1]['target_return'].mean(),
+            include_groups=False
         ).fillna(0) # 如果那天没选出，收益为0
         
         # 8. 基准收益 (SPY 和 QQQ)
