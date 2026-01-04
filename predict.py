@@ -8,6 +8,7 @@ from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from data.provider import DataProvider
 from features.builder import FeatureBuilder
 import argparse
+import pytz
 
 # 加载环境变量
 load_dotenv()
@@ -31,21 +32,27 @@ def run_prediction():
     # 映射周期
     if tf_str == '1d':
         timeframe = TimeFrame.Day
+        bar_duration = timedelta(days=1)
     elif tf_str == '1h':
         timeframe = TimeFrame.Hour
+        bar_duration = timedelta(hours=1)
     elif tf_str.endswith('m'):
         try:
             mins = int(tf_str.replace('m', ''))
             timeframe = TimeFrame(mins, TimeFrameUnit.Minute)
+            bar_duration = timedelta(minutes=mins)
         except ValueError:
             timeframe = TimeFrame.Day
+            bar_duration = timedelta(days=1)
     else:
         timeframe = TimeFrame.Day
+        bar_duration = timedelta(days=1)
 
     if args.model:
         model_path = args.model
     else:
-        model_path = f"output/mag7_{tf_str}_ranker.joblib"
+        # 默认使用通用分类模型
+        model_path = "models/universal_pa_smc_classifier.joblib"
     
     if not os.path.exists(model_path):
         print(f"错误: 找不到模型文件 {model_path}。")
@@ -53,27 +60,30 @@ def run_prediction():
             print(f"请先运行训练命令 (例如: make train-{tf_str})")
         return
 
-    # 1. 确定时间范围
+    # 1. 确定时间范围 (使用美东时间)
+    ny_tz = pytz.timezone("America/New_York")
+    
     if args.date:
         try:
+            # 输入日期默认为 ET
             if len(args.date) > 10:
                 target_dt = datetime.strptime(args.date, "%Y-%m-%d %H:%M:%S")
             else:
                 target_dt = datetime.strptime(args.date, "%Y-%m-%d")
             
-            # 为了计算特征，需要从目标时间往前拉数据
+            # 为了计算特征，需要往前多拉数据
             start_date = target_dt - timedelta(days=60)
-            # 往后拉一点点以防万一
             end_date = target_dt + timedelta(days=1)
-            prediction_mode_desc = f"历史分析时刻: {target_dt}"
+            prediction_mode_desc = f"历史分析时刻: {target_dt} ET"
         except ValueError:
             print("错误: 日期格式无效。请使用 YYYY-MM-DD 或 'YYYY-MM-DD HH:MM:SS'")
             return
     else:
-        target_dt = None
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=60)
-        prediction_mode_desc = "最新实时数据分析"
+        # 实时模式：强制获取当前美东时间
+        target_dt = datetime.now(ny_tz).replace(tzinfo=None)
+        start_date = target_dt - timedelta(days=60)
+        end_date = target_dt + timedelta(days=1)
+        prediction_mode_desc = f"最新实时分析 (当前 ET: {target_dt.strftime('%Y-%m-%d %H:%M:%S')})"
 
     print(f"正在获取 {len(symbols)} 个标的 ({tf_str}) 数据进行预测 (时间标准: 美东时间 ET)...")
     print(f"分析模式: {prediction_mode_desc}")
@@ -90,17 +100,21 @@ def run_prediction():
         builder = FeatureBuilder()
         df_features = builder.add_all_features(df_raw, is_training=False)
         
-        # 3. 筛选预测时刻的数据
-        if target_dt:
-            # 找到最接近 target_dt 的 timestamp
-            df_features['dt_diff'] = (df_features['timestamp'] - target_dt).abs()
-            closest_ts = df_features.sort_values('dt_diff').iloc[0]['timestamp']
-            print(f"匹配到最接近的行情时刻: {closest_ts}")
-            latest_data = df_features[df_features['timestamp'] == closest_ts].copy()
-        else:
-            # 使用最新的一个 timestamp
+        # 3. 筛选预测时刻的数据 (采用点对点逻辑：选择在该时刻前已结束的最后一根 K 线)
+        # 规则：timestamp + duration <= target_dt
+        df_features['is_complete'] = (df_features['timestamp'] + bar_duration) <= target_dt
+        
+        complete_bars = df_features[df_features['is_complete'] == True]
+        
+        if complete_bars.empty:
+            # 如果没有完全结束的，退而求其次找最近的一根（可能是正在生成的）
+            print("提示: 未找到已完全结束的 K 线，使用最近的一根进行参考。")
             latest_ts = df_features['timestamp'].max()
-            latest_data = df_features[df_features['timestamp'] == latest_ts].copy()
+        else:
+            latest_ts = complete_bars['timestamp'].max()
+            
+        print(f"匹配到分析行情时刻: {latest_ts} (覆盖至 {latest_ts + bar_duration})")
+        latest_data = df_features[df_features['timestamp'] == latest_ts].copy()
             
         if latest_data.empty:
             print("错误: 处理后的数据为空。")
@@ -111,56 +125,79 @@ def run_prediction():
         # 4. 加载模型
         model = joblib.load(model_path)
         
-        # 5. 定义特征列 (必须与训练时一致)
-        # 如果是通用模型，使用全量特征
-        if "universal" in model_path.lower():
-            feature_cols = [
-                'return_1d', 'return_5d', 'ma_5_rel', 'ma_20_rel', 'ma_ratio', 'rsi', 
-                'macd_rel', 'macd_signal_rel', 'macd_hist_rel', 'bb_upper_rel', 
-                'bb_lower_rel', 'bb_width', 'volume_change', 'volume_ma_5', 
-                'volume_ratio', 'volatility_20d', 'body_size_rel', 'candle_range_rel', 
-                'upper_wick_rel', 'lower_wick_rel', 'wick_ratio', 'is_pin_bar', 
-                'is_engulfing', 'swing_high', 'swing_low', 'bos_up', 'bos_down', 
-                'fvg_up', 'fvg_down', 'fvg_size_rel', 'displacement', 'ob_bullish', 'ob_bearish'
-            ]
+        # 5. 定义特征列 (自动识别，排除非特征列)
+        exclude_cols = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 
+                        'target_return', 'target_rank', 'atr', 'vwap', 'trade_count', 
+                        'max_future_return', 'target_signal', 'dt_diff', 'is_complete']
+        feature_cols = [c for c in latest_data.columns if c not in exclude_cols]
+        
+        print(f"输入特征维度: {len(feature_cols)}")
+        
+        # 6. 执行预测 (概率)
+        # 初始化置信度列
+        for col in ['long_p', 'short_p']:
+            if col not in latest_data.columns:
+                latest_data[col] = 0.0
+
+        # 类别 0: Neutral, 1: Long, 2: Short
+        if hasattr(model, 'predict_proba'):
+            try:
+                probs = model.predict_proba(latest_data[feature_cols])
+                if probs.shape[1] >= 3:
+                    latest_data['long_p'] = probs[:, 1]
+                    latest_data['short_p'] = probs[:, 2]
+                else:
+                    # 如果只有 2 类 (旧的二分类模型)
+                    latest_data['long_p'] = probs[:, 1]
+                    latest_data['short_p'] = 0.0
+            except Exception as e:
+                print(f"警告: 概率预测失败 ({e})，可能是特征不匹配。")
+            
+            # score 用于主排序逻辑，这里取较大的概率
+            latest_data['score'] = latest_data[['long_p', 'short_p']].max(axis=1)
         else:
-            feature_cols = [
-                'return_1d', 'return_5d', 'ma_5', 'ma_20', 
-                'ma_ratio', 'rsi', 'volatility_20d',
-                'macd', 'macd_signal', 'macd_hist',
-                'bb_width', 'volume_ratio', 'volume_change',
-                'wick_ratio', 'is_pin_bar', 'is_engulfing',
-                'fvg_up', 'fvg_down', 'displacement'
-            ]
+            try:
+                latest_data['score'] = model.predict(latest_data[feature_cols])
+            except Exception as e:
+                print(f"错误: 预测失败。请确保使用的是最新的模型文件。")
+                raise e
         
-        # 6. 执行预测 (评分)
-        latest_data['score'] = model.predict(latest_data[feature_cols])
+        # 排序 (置信度从高到低)
+        results = latest_data[['symbol', 'close', 'long_p', 'short_p', 'score']].sort_values('score', ascending=False)
         
-        # 排序
-        results = latest_data[['symbol', 'close', 'score']].sort_values('score', ascending=False)
-        
-        print("\n" + "="*50)
-        print(f"Mag7 排序预测分析 ({tf_str}) - 美东时间 (ET)")
+        print("\n" + "="*70)
+        print(f"PA/SMC 信号方向预测 ({tf_str}) - 美东时间 (ET)")
         print(f"分析时刻: {analysis_time}")
-        print("-" * 50)
-        print(f"{'代码':<8} | {'收盘价格':<10} | {'预测得分':<10}")
-        print("-" * 50)
+        print("-" * 70)
+        print(f"{'代码':<8} | {'价格':<10} | {'做多置信度':<15} | {'做空置信度':<15}")
+        print("-" * 70)
         
         for _, row in results.iterrows():
-            print(f"{row['symbol']:<8} | {row['close']:<10.2f} | {row['score']:<10.4f}")
+            print(f"{row['symbol']:<8} | {row['close']:<10.2f} | {row['long_p']:<15.2%} | {row['short_p']:<15.2%}")
             
-        print("-" * 50)
+        print("-" * 70)
         if len(results) > 1:
-            top_symbol = results.iloc[0]['symbol']
-            bottom_symbol = results.iloc[-1]['symbol']
-            print(f"📈 建议做多 (Long): {top_symbol}")
-            print(f"📉 建议做空 (Short): {bottom_symbol}")
+            top_row = results.iloc[0]
+            direction = "Long 📈" if top_row['long_p'] > top_row['short_p'] else "Short 📉"
+            top_conf = max(top_row['long_p'], top_row['short_p'])
+            print(f"🚀 最强建议: {top_row['symbol']} [{direction}] (置信度: {top_conf:.1%})")
+            
+            # 显示置信度较高的方向
+            high_long = results[results['long_p'] > 0.45]['symbol'].tolist()
+            high_short = results[results['short_p'] > 0.45]['symbol'].tolist()
+            if high_long: print(f"🐂 潜在做多: {', '.join(high_long)}")
+            if high_short: print(f"🐻 潜在做空: {', '.join(high_short)}")
         else:
-            symbol = results.iloc[0]['symbol']
-            score = results.iloc[0]['score']
-            direction = "看涨 (Bullish)" if score > 0 else "看跌 (Bearish)"
-            icon = "🚀" if score > 0 else "⚠️"
-            print(f"{icon} 方向建议: {symbol} 目前{direction}")
+            row = results.iloc[0]
+            if row['long_p'] > row['short_p']:
+                status, icon = "多头 Setup", "🐂"
+                conf = row['long_p']
+            else:
+                status, icon = "空头 Setup", "🐻"
+                conf = row['short_p']
+            
+            if conf < 0.4: status, icon = "中性观察", "👀"
+            print(f"{icon} {row['symbol']} 状态: {status} (置信度: {conf:.1%})")
         print("="*50)
 
     except Exception as e:

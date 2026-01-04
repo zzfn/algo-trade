@@ -21,9 +21,12 @@ class FeatureBuilder:
             processed_groups.append(processed)
         df = pd.concat(processed_groups).reset_index(drop=True)
         
+        # 添加全局特征 (如洗盘信号)
+        df = self.add_shakeout_features(df)
+        
         if is_training:
-            # 添加截面排名标签 (Cross-sectional Ranking)
-            df = self.add_rank_target(df)
+            # 添加信号标签 (Classification: 未来 5 周期是否能涨 > 0.5%)
+            df = self.add_classification_target(df)
             df = df.dropna()
         else:
             # 预测模式下，只删除特征为 NaN 的行
@@ -40,9 +43,8 @@ class FeatureBuilder:
         df['atr'] = self._calculate_atr(df) # 用于归一化
         
         df = self.add_returns(df)
-        df = self.add_moving_averages(df)
-        df = self.add_rsi(df)
-        df = self.add_macd(df)
+        df = self.add_emas(df)
+        df = self.add_adx(df)
         df = self.add_bollinger_bands(df)
         df = self.add_volume_features(df)
         df = self.add_volatility(df)
@@ -58,32 +60,44 @@ class FeatureBuilder:
         return tr.rolling(window=period).mean()
 
     def add_returns(self, df: pd.DataFrame) -> pd.DataFrame:
-        df['return_1d'] = df['close'].pct_change(1)
-        df['return_5d'] = df['close'].pct_change(5)
+        df['return_1p'] = df['close'].pct_change(1)
+        df['return_5p'] = df['close'].pct_change(5)
         df['target_return'] = df['close'].pct_change().shift(-1)
         return df
 
-    def add_moving_averages(self, df: pd.DataFrame) -> pd.DataFrame:
-        df['ma_5_rel'] = (df['close'].rolling(window=5).mean() / df['close']) - 1
-        df['ma_20_rel'] = (df['close'].rolling(window=20).mean() / df['close']) - 1
-        df['ma_ratio'] = (df['ma_5_rel'] + 1) / (df['ma_20_rel'] + 1)
+    def add_emas(self, df: pd.DataFrame) -> pd.DataFrame:
+        df['ema_20_rel'] = (df['close'].ewm(span=20, adjust=False).mean() / df['close']) - 1
         return df
 
-    def add_rsi(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / (loss + 1e-9)
-        df['rsi'] = (100 - (100 / (1 + rs))) / 100 # 归一化到 0-1
-        return df
-
-    def add_macd(self, df: pd.DataFrame) -> pd.DataFrame:
-        exp1 = df['close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['close'].ewm(span=26, adjust=False).mean()
-        # MACD 归一化为价格的百分比
-        df['macd_rel'] = (exp1 - exp2) / df['close']
-        df['macd_signal_rel'] = df['macd_rel'].ewm(span=9, adjust=False).mean()
-        df['macd_hist_rel'] = df['macd_rel'] - df['macd_signal_rel']
+    def add_adx(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+        """
+        Average Directional Index (ADX).
+        捕捉趋势强度，不分方向。
+        """
+        df = df.copy()
+        high = df['high']
+        low = df['low']
+        close = df['close']
+        
+        plus_dm = high.diff()
+        minus_dm = low.diff().abs()
+        
+        plus_dm[~((plus_dm > minus_dm) & (plus_dm > 0))] = 0
+        minus_dm[~((minus_dm > plus_dm) & (minus_dm > 0))] = 0
+        
+        tr = pd.concat([
+            high - low,
+            (high - close.shift()).abs(),
+            (low - close.shift()).abs()
+        ], axis=1).max(axis=1)
+        
+        # Wilder's Smoothing
+        atr = tr.rolling(window=period).mean() # 简化版 TR 均值作为平滑
+        plus_di = 100 * (plus_dm.rolling(window=period).mean() / (atr + 1e-9))
+        minus_di = 100 * (minus_dm.rolling(window=period).mean() / (atr + 1e-9))
+        
+        dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-9)
+        df['adx'] = dx.rolling(window=period).mean() / 100.0 # 归一化到 0-1
         return df
 
     def add_bollinger_bands(self, df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
@@ -150,12 +164,63 @@ class FeatureBuilder:
         
         return df
 
-    def add_rank_target(self, df: pd.DataFrame) -> pd.DataFrame:
+    def add_classification_target(self, df: pd.DataFrame, horizon: int = 5, threshold: float = 0.005) -> pd.DataFrame:
+        """
+        计算多分类信号标签。
+        1 (Long): 未来 horizon 周期内最高价涨幅 > threshold。
+        2 (Short): 未来 horizon 周期内最低价跌幅 < -threshold。
+        0 (Neutral): 其他。
+        如果同时满足，以先达到的为准（简化版：Long 优先）。
+        """
+        def get_directional_target(group):
+            # 未来 N 个周期的滚动最高和最低收益
+            f_max = group['close'].shift(-1).rolling(window=horizon, min_periods=1).max() / group['close'] - 1
+            f_min = group['close'].shift(-1).rolling(window=horizon, min_periods=1).min() / group['close'] - 1
+            
+            target = np.zeros(len(group))
+            # 逻辑：Long 1, Short 2, Neutral 0
+            target[f_max > threshold] = 1
+            target[f_min < -threshold] = 2
+            # 特殊处理：如果两者都满足，这里简化为 1 (可以根据需求精细化)
+            target[(f_max > threshold) & (f_min < -threshold)] = 1
+            return pd.Series(target, index=group.index)
+
+        df['target_signal'] = df.groupby('symbol', group_keys=False).apply(get_directional_target, include_groups=False).astype(int)
+        return df
+
+    def add_rank_target(self, df: pd.DataFrame, horizon: int = 5) -> pd.DataFrame:
         """
         计算截面排名标签。
+        用于 L2 Ranking 模型。
         """
+        # 计算未来 N 个周期的收益率作为排名依据
+        df['target_return'] = df.groupby('symbol')['close'].shift(-horizon) / df['close'] - 1
+        # 在每个时间切片内进行排名 (0 到 N-1)
         df['target_rank'] = df.groupby('timestamp')['target_return'].rank(method='first', ascending=True) - 1
         return df
+
+    def add_shakeout_features(self, df: pd.DataFrame, lookback: int = 20) -> pd.DataFrame:
+        """
+        检测洗盘 (Shakeout/Stop-Hunt) 信号。
+        逻辑：价格突破前高/低后，在 N 根 K 线内反向拉回。
+        """
+        def detect_shakeout(group):
+            # 最近的 Swing High / Low
+            group['local_high'] = group['high'].rolling(lookback).max().shift(1)
+            group['local_low'] = group['low'].rolling(lookback).min().shift(1)
+            
+            # 多头洗盘 (Bullish Shakeout): 低点破了 local_low，但收盘拉回到 local_low 之上
+            group['shakeout_bull'] = ((group['low'] < group['local_low']) & (group['close'] > group['local_low'])).astype(int)
+            
+            # 空头洗盘 (Bearish Shakeout): 高点破了 local_high，但收盘跌回到 local_high 之下
+            group['shakeout_bear'] = ((group['high'] > group['local_high']) & (group['close'] < group['local_high'])).astype(int)
+            
+            return group[['shakeout_bull', 'shakeout_bear']]
+
+        shakeouts = df.groupby('symbol', group_keys=False).apply(detect_shakeout, include_groups=False)
+        df = pd.concat([df, shakeouts], axis=1)
+        return df
+
 
 if __name__ == "__main__":
     # Test with multi-symbol dummy data
@@ -176,4 +241,7 @@ if __name__ == "__main__":
     df = pd.DataFrame(data)
     builder = FeatureBuilder()
     res = builder.add_all_features(df)
-    print(res[['timestamp', 'symbol', 'target_return', 'target_rank']].head(15))
+    print(f"Columns: {res.columns.tolist()}")
+    if 'target_signal' in res.columns:
+        print(f"Signal distribution: \n{res['target_signal'].value_counts()}")
+    print(res.head(5))

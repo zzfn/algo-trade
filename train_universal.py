@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from alpaca.data.timeframe import TimeFrame
 from data.provider import DataProvider
 from features.builder import FeatureBuilder
-from models.trainer import RankingModelTrainer
+from models.trainer import SignalClassifierTrainer
 
 def main():
     # Load environment variables
@@ -14,7 +14,7 @@ def main():
     # 1. Initialize components
     provider = DataProvider()
     builder = FeatureBuilder()
-    trainer = RankingModelTrainer(model_name="Universal_PA_SMC")
+    trainer = SignalClassifierTrainer(model_name="Universal_PA_SMC_Classifier")
 
     # 2. Define universe and timeframe
     symbols = ["QQQ", "SPY", "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "NVDA", "META", "AMD", "NFLX", "INTC"]
@@ -41,20 +41,22 @@ def main():
 
     # 5. Define feature columns
     # Exclude non-feature columns
-    exclude_cols = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 'target_return', 'target_rank', 'atr', 'vwap', 'trade_count']
+    exclude_cols = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 
+                    'target_return', 'target_rank', 'atr', 'vwap', 'trade_count', 
+                    'max_future_return', 'target_signal']
     feature_cols = [c for c in df_with_features.columns if c not in exclude_cols]
     
     print(f"Training with {len(feature_cols)} features: {feature_cols}")
 
     # 6. Train model
-    trainer.train(df_with_features, feature_cols, 'target_rank')
+    trainer.train(df_with_features, feature_cols, 'target_signal')
 
     # 7. Save model
     model_dir = "models"
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
         
-    model_path = os.path.join(model_dir, "universal_pa_smc.joblib")
+    model_path = os.path.join(model_dir, "universal_pa_smc_classifier.joblib")
     trainer.save_model(model_path)
 
 if __name__ == "__main__":

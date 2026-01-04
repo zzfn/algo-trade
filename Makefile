@@ -42,7 +42,7 @@ backtest-15m:
 	uv run python backtest.py 15m --days 30 --top_n 1
 
 backtest-universal:
-	uv run python backtest.py $(if $(tf),$(tf),1h) --days $(if $(days),$(days),90) --top_n 1 --model models/universal_pa_smc.joblib $(if $(details),--details,) $(if $(symbols),--symbols "$(symbols)",)
+	uv run python backtest.py $(if $(tf),$(tf),1h) --days $(if $(days),$(days),90) --top_n 1 --model models/universal_pa_smc_classifier.joblib $(if $(details),--details,) $(if $(symbols),--symbols "$(symbols)",)
 
 # 预测命令
 predict-1d:
@@ -52,7 +52,7 @@ predict-1h:
 	uv run python predict.py 1h
 
 predict-universal:
-	uv run python predict.py $(if $(tf),$(tf),1h) --model models/universal_pa_smc.joblib $(if $(date),--date "$(date)$(if $(time), $(time),)",) $(if $(symbols),--symbols "$(symbols)",)
+	uv run python predict.py $(if $(tf),$(tf),1h) --model models/universal_pa_smc_classifier.joblib $(if $(date),--date "$(date)$(if $(time), $(time),)",) $(if $(symbols),--symbols "$(symbols)",)
 
 predict-hist:
 	uv run python predict.py $(tf) --date "$(date)$(if $(time), $(time),)"

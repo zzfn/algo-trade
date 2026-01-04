@@ -60,14 +60,120 @@ class RankingModelTrainer:
         
         print("模型训练完成。")
 
-    def save_model(self, path: str) -> None:
+    def save(self, path: str) -> None:
         if self.model:
             joblib.dump(self.model, path)
-            print(f"模型已保存至 {path}")
+            print(f"Model saved to {path}")
         else:
             print("错误: 没有可保存的模型。")
+
+    def load(self, path: str):
+        self.model = joblib.load(path)
+        print(f"Model loaded from {path}")
+        return self.model
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         if self.model:
             return self.model.predict(X)
+        return np.array([])
+
+class SignalClassifierTrainer:
+    def __init__(self, model_name: str = "Universal_Signal_Classifier"):
+        self.model_name = model_name
+        self.model = None
+
+    def train(self, df: pd.DataFrame, feature_cols: List[str], target_col: str) -> None:
+        """
+        使用 LightGBM Classifier 进行二分类训练。
+        """
+        # 1. 准备数据
+        X = df[feature_cols]
+        y = df[target_col]
+        
+        # 2. 时间序列划分 (按行，因为现在不需要 group)
+        split_idx = int(len(df) * 0.8)
+        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+        
+        print(f"正在训练信号分类模型... 总样本: {len(df)}, 训练样本: {len(X_train)}, 测试样本: {len(X_test)}")
+        print(f"信号分布: \n{y_train.value_counts(normalize=True)}")
+        
+        # 3. 模型配置
+        self.model = lgb.LGBMClassifier(
+            objective="multiclass",
+            num_class=3,
+            metric="multi_logloss",
+            num_leaves=31,
+            learning_rate=0.05,
+            n_estimators=200,
+            random_state=42,
+            verbosity=-1
+        )
+        
+        # 4. 执行训练
+        self.model.fit(
+            X_train, y_train,
+            eval_set=[(X_test, y_test)]
+        )
+
+    def save(self, path: str) -> None:
+        if self.model:
+            joblib.dump(self.model, path)
+            print(f"Model saved to {path}")
+
+    def load(self, path: str):
+        self.model = joblib.load(path)
+        print(f"Model loaded from {path}")
+        return self.model
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        if self.model:
+            return self.model.predict(X)
+        return np.array([])
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        if self.model:
+            return self.model.predict_proba(X)
+        return np.array([])
+
+class SklearnClassifierTrainer:
+    def __init__(self, model_type: str = "rf"):
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.linear_model import LogisticRegression
+        
+        if model_type == "rf":
+            self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+        else:
+            self.model = LogisticRegression(max_iter=1000)
+            
+    def train(self, df: pd.DataFrame, feature_cols: List[str], target_col: str):
+        # 简单的时间序列切分
+        df = df.sort_values("timestamp")
+        train_size = int(len(df) * 0.8)
+        train_df = df.iloc[:train_size]
+        test_df = df.iloc[train_size:]
+        
+        X_train, y_train = train_df[feature_cols], train_df[target_col]
+        X_test, y_test = test_df[feature_cols], test_df[target_col]
+        
+        self.model.fit(X_train, y_train)
+        
+        # 评估
+        score = self.model.score(X_test, y_test)
+        print(f"Sklearn Model ({type(self.model).__name__}) Accuracy: {score:.4f}")
+        return score
+
+    def save(self, path: str):
+        import joblib
+        joblib.dump(self.model, path)
+        print(f"Model saved to {path}")
+
+    def load(self, path: str):
+        import joblib
+        self.model = joblib.load(path)
+        return self.model
+        
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        if self.model:
+            return self.model.predict_proba(X)
         return np.array([])
