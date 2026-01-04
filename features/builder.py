@@ -5,7 +5,7 @@ class FeatureBuilder:
     def __init__(self):
         pass
 
-    def add_all_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    def add_all_features(self, df: pd.DataFrame, is_training: bool = True) -> pd.DataFrame:
         """
         Add all technical indicators to the dataframe.
         """
@@ -17,10 +17,17 @@ class FeatureBuilder:
         df = self.add_bollinger_bands(df)
         df = self.add_volume_features(df)
         df = self.add_volatility(df)
-        df = self.add_target(df)
         
-        # Drop rows with NaN values created by rolling windows
-        df = df.dropna()
+        if is_training:
+            df = self.add_target(df)
+            # Drop rows with NaN values created by rolling windows and target shift
+            df = df.dropna()
+        else:
+            # For prediction, we only drop rows where features are NaN (initial rolling window)
+            # but keep the very last row even if we don't know the future target
+            feature_cols = [c for c in df.columns if c not in ['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+            df = df.dropna(subset=feature_cols)
+            
         return df
 
     def add_returns(self, df: pd.DataFrame) -> pd.DataFrame:

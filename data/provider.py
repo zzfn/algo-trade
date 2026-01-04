@@ -4,10 +4,25 @@ from datetime import datetime, timedelta
 from typing import Optional
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.data.enums import DataFeed
 
 class DataProvider:
+    @staticmethod
+    def get_tf_string(tf: TimeFrame) -> str:
+        """
+        将 Alpaca TimeFrame 转换为业界通用字符串 (如 1d, 15m, 1h)
+        """
+        unit_map = {
+            TimeFrameUnit.Minute: 'm',
+            TimeFrameUnit.Hour: 'h',
+            TimeFrameUnit.Day: 'd',
+            TimeFrameUnit.Week: 'w',
+            TimeFrameUnit.Month: 'M'
+        }
+        unit_str = unit_map.get(tf.unit, 'u')
+        return f"{tf.amount}{unit_str}"
+
     def __init__(self, api_key: Optional[str] = None, secret_key: Optional[str] = None):
         self.api_key = api_key or os.getenv("ALPACA_API_KEY")
         self.secret_key = secret_key or os.getenv("ALPACA_SECRET_KEY")

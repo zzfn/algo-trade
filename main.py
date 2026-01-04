@@ -1,7 +1,8 @@
 import os
+import sys
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
-from alpaca.data.timeframe import TimeFrame
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from data.provider import DataProvider
 from features.builder import FeatureBuilder
 from models.trainer import QQQModelTrainer
@@ -10,13 +11,41 @@ from models.trainer import QQQModelTrainer
 load_dotenv()
 
 def main():
-    # 1. Setup
+    # 1. 默认配置
     symbol = "QQQ"
-    timeframe = TimeFrame.Day
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=365 * 5)  # 5 years of data
+    timeframe = TimeFrame.Day 
     
-    print(f"正在启动 {symbol} 训练流水线...")
+    # 尝试从命令行参数获取周期 (如: python main.py 15m)
+    if len(sys.argv) > 1:
+        arg = sys.argv[1].lower()
+        if arg == '1d':
+            timeframe = TimeFrame.Day
+        elif arg == '1h':
+            timeframe = TimeFrame.Hour
+        elif arg.endswith('m'):
+            try:
+                mins = int(arg.replace('m', ''))
+                timeframe = TimeFrame(mins, TimeFrameUnit.Minute)
+            except ValueError:
+                print(f"警告: 无法解析周期 '{arg}'，将使用默认日线(1d)。")
+        else:
+            print(f"警告: 未知的周期格式 '{arg}'，将使用默认日线(1d)。")
+    
+    # 转换周期为业界规范字符串 (如 1d, 15m)
+    tf_str = DataProvider.get_tf_string(timeframe)
+    
+    # 根据周期自动调整获取数据的长度
+    if timeframe.unit == TimeFrameUnit.Day:
+        days_to_fetch = 365 * 5 # 日线看 5 年
+    elif timeframe.unit == TimeFrameUnit.Hour:
+        days_to_fetch = 365 * 1 # 小时线看 1 年
+    else:
+        days_to_fetch = 60      # 分钟线看两个月 (防止数据量过大)
+        
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days_to_fetch)
+    
+    print(f"正在启动 {symbol} ({tf_str}) 训练流水线...")
     
     try:
         # 2. 获取数据
@@ -44,7 +73,8 @@ def main():
         
         # 6. 保存模型
         os.makedirs("output", exist_ok=True)
-        trainer.save_model("output/qqq_lgbm_model.joblib")
+        model_filename = f"output/{symbol}_{tf_str}_lgbm.joblib"
+        trainer.save_model(model_filename)
         
         print("流水线执行成功。")
         
