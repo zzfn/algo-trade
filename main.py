@@ -63,7 +63,9 @@ def main():
             'return_1d', 'return_5d', 'ma_5', 'ma_20', 
             'ma_ratio', 'rsi', 'volatility_20d',
             'macd', 'macd_signal', 'macd_hist',
-            'bb_width', 'volume_ratio', 'volume_change'
+            'bb_width', 'volume_ratio', 'volume_change',
+            'wick_ratio', 'is_pin_bar', 'is_engulfing',
+            'fvg_up', 'fvg_down', 'displacement'
         ]
         target_col = 'target'
         

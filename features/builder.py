@@ -17,6 +17,8 @@ class FeatureBuilder:
         df = self.add_bollinger_bands(df)
         df = self.add_volume_features(df)
         df = self.add_volatility(df)
+        df = self.add_price_action(df)
+        df = self.add_smc_features(df)
         
         if is_training:
             df = self.add_target(df)
@@ -74,6 +76,45 @@ class FeatureBuilder:
 
     def add_volatility(self, df: pd.DataFrame) -> pd.DataFrame:
         df['volatility_20d'] = df['close'].pct_change().rolling(window=20).std()
+        return df
+
+    def add_price_action(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        价格行为学因子 (Price Action)
+        """
+        df['body_size'] = (df['close'] - df['open']).abs()
+        df['candle_range'] = df['high'] - df['low']
+        
+        # 影线比例
+        df['upper_wick'] = df['high'] - df[['open', 'close']].max(axis=1)
+        df['lower_wick'] = df[['open', 'close']].min(axis=1) - df['low']
+        df['wick_ratio'] = (df['upper_wick'] + df['lower_wick']) / (df['candle_range'] + 1e-6)
+        
+        # 常见形态识别
+        # Pin Bar: 影线长度至少是实体的 2 倍
+        df['is_pin_bar'] = ((df['upper_wick'] > df['body_size'] * 2) | 
+                            (df['lower_wick'] > df['body_size'] * 2)).astype(int)
+        
+        # 吞没形态 (Engulfing)
+        df['is_engulfing'] = ((df['body_size'] > df['body_size'].shift(1)) & 
+                              (df['close'].pct_change() * df['close'].shift(1).pct_change() < 0)).astype(int)
+        return df
+
+    def add_smc_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        聪明钱概念因子 (Smart Money Concepts)
+        """
+        # 1. FVG (Fair Value Gap) - 公允价值缺口
+        # 看涨 FVG: 前一根的高点 < 后一根的低点
+        df['fvg_up'] = ((df['low'] > df['high'].shift(2))).astype(int)
+        # 看跌 FVG: 前一根的低点 > 后一根的高点
+        df['fvg_down'] = ((df['high'] < df['low'].shift(2))).astype(int)
+        
+        # 2. Displacement (位移/强势波动)
+        # 如果当前波动范围超过过去 20 根平均波动范围的 2 倍，视为位移
+        df['atr_sim'] = df['candle_range'].rolling(window=20).mean()
+        df['displacement'] = (df['candle_range'] > df['atr_sim'] * 2).astype(int)
+        
         return df
 
     def add_target(self, df: pd.DataFrame) -> pd.DataFrame:
