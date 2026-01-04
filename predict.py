@@ -18,10 +18,14 @@ def run_prediction():
     parser.add_argument("timeframe", nargs="?", default="1h", help="预测周期 (如 1d, 15m, 1h)")
     parser.add_argument("--date", help="指定历史分析日期 (格式: YYYY-MM-DD 或 'YYYY-MM-DD HH:MM:SS')")
     parser.add_argument("--model", help="指定模型文件路径")
+    parser.add_argument("--symbols", help="指定分析标的，用逗号分隔 (如 AAPL,TSLA,COIN)")
     
     args = parser.parse_args()
     
-    symbols = ["SPY", "QQQ", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"]
+    if args.symbols:
+        symbols = [s.strip().upper() for s in args.symbols.split(",")]
+    else:
+        symbols = ["SPY", "QQQ", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"]
     tf_str = args.timeframe.lower()
     
     # 映射周期
