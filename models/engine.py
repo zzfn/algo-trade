@@ -74,7 +74,7 @@ class StrategyEngine:
         results['l2_ranked'] = l2_latest.sort_values('rank_score', ascending=False)
         results['l2_timestamp'] = last_h_ts
 
-        # --- L3: Execution Signal ---
+        # --- L3: Trend Confirmation ---
         all_l2_symbols = l2_latest['symbol'].tolist()
         l3_start = target_dt - timedelta(days=L3_LOOKBACK_DAYS)
         df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame(15, TimeFrameUnit.Minute), l3_start, target_dt + timedelta(days=1))
@@ -153,7 +153,7 @@ class StrategyEngine:
         过滤和排序信号，返回达到阈值的 top_n 个高置信度标的。
         
         Args:
-            l3_signals: L3 信号 DataFrame (包含 long_p, short_p 等列)
+            l3_signals: L3 趋势信号 DataFrame (包含 long_p, short_p 等列)
             direction: 'long' 或 'short'
             top_n: 返回的标的数量，默认使用 TOP_N_TRADES
             

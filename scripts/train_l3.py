@@ -19,7 +19,7 @@ def train_l3_model():
     
     # 使用与 L2 相同的标的池，保持模型一致性
     symbols = L2_SYMBOLS
-    print(f"Fetching 15m data for {len(symbols)} stocks for L3 execution...")
+    print(f"Fetching 15m data for {len(symbols)} stocks for L3 trend confirmation...")
     
     df_raw = provider.fetch_bars(symbols, TimeFrame(15, TimeFrameUnit.Minute), start_date, end_date)
     print(f"Raw data rows: {len(df_raw)}")
@@ -37,12 +37,12 @@ def train_l3_model():
     print(f"Training L3 Classifier with {len(feature_cols)} features.")
     
     # 4. 训练模型
-    trainer = SignalClassifierTrainer(model_name="L3_Execution_Model")
+    trainer = SignalClassifierTrainer(model_name="L3_Trend_Model")
     trainer.train(df, feature_cols, 'target_signal')
     
     # 5. 保存
     trainer.save("models/artifacts/l3_execution.joblib")
-    print("L3 Execution model training complete.")
+    print("L3 Trend model training complete.")
 
 if __name__ == "__main__":
     train_l3_model()

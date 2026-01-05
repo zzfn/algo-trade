@@ -13,6 +13,7 @@ def train_l1_model():
     
     # 1. 获取 2 年以上的历史数据以进行宏观训练
     # 截止日期固定为 2024-12-31，2025 年数据用于样本外验证
+    # L1: 宏观择时模型 (Macro Market Timing)
     end_date = datetime(2024, 12, 31)
     start_date = end_date - timedelta(days=365 * 2)
     

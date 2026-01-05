@@ -73,7 +73,7 @@ def run_hierarchical_prediction():
         logger.info(f"{i+1:<4} | {row['symbol']:<8} | {row['close']:<10.2f} | {row['rank_score']:.4f} {icon}")
 
     # L3 Result
-    logger.info("\n[L3: 执行信号检测] (针对所有标的)...")
+    logger.info("\n[L3: 趋势确认检测] (针对所有标的)...")
     l3_latest = results.get('l3_signals')
     if l3_latest is None or l3_latest.empty:
         logger.error("❌ 无法获取 L3 信号所需的历史数据。")

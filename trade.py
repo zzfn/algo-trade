@@ -72,7 +72,7 @@ class TradingBot:
             logger.error("❌ No signal data available.")
             return
 
-        # 3. 交易信号执行逻辑 (Top N 分散交易)
+        # 3. 趋势确认执行逻辑 (Top N 分散交易)
         # 使用 engine.filter_signals 统一过滤高置信度标的
         long_signals = self.engine.filter_signals(l3_signals, direction="long", top_n=self.TOP_N_TRADES)
         short_signals = self.engine.filter_signals(l3_signals, direction="short", top_n=self.TOP_N_TRADES)

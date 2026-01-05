@@ -14,7 +14,7 @@ load_dotenv()
 logger = setup_logger("l3_backtest")
 
 def run_l3_backtest(symbol, days=30):
-    logger.info(f"🚀 开始 L3 (择时信号) 回测: {symbol}, 回溯 {days} 天")
+    logger.info(f"🚀 开始 L3 (趋势确认) 回测: {symbol}, 回溯 {days} 天")
     
     engine = StrategyEngine()
     
@@ -129,7 +129,7 @@ def run_l3_backtest(symbol, days=30):
     total_pnl = sum(t['pnl'] for t in trades if 'pnl' in t)
     
     print("\n" + "="*60)
-    print(f"📊 L3 执行信号模型回测结果 ({symbol})")
+    print(f"📊 L3 趋势确认模型回测结果 ({symbol})")
     print("="*60)
     print(f"交易次数: {len([t for t in trades if 'close' in t['type']])}")
     print(f"总 PnL: ${total_pnl:.2f}")

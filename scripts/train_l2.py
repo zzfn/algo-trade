@@ -15,6 +15,7 @@ def train_l2_model():
     
     # 1. 获取 1 年的小时线数据
     # 截止日期固定为 2024-12-31，2025 年数据用于样本外验证
+    # L2: 截面选股模型 (Cross-sectional Stock Selection)
     end_date = datetime(2024, 12, 31)
     start_date = end_date - timedelta(days=365)
     

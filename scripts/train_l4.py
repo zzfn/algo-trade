@@ -20,6 +20,7 @@ def train_l4_model():
     
     # 1. 获取 1 年的小时线数据
     # 截止日期固定为 2024-12-31，2025 年数据用于样本外验证
+    # L4: 收益预测模型 (Return Prediction) -> 动态仓位; SMC 风控用于 TP/SL
     end_date = datetime(2024, 12, 31)
     start_date = end_date - timedelta(days=365)
     
