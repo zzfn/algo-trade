@@ -128,14 +128,6 @@ def run_backtest():
         # 使用 align 和 fill_value=0 确保如果某个时刻只有单边信号也能计算
         strategy_daily = long_daily.add(short_daily, fill_value=0) / 2
         
-        # 调试输出
-        print("\n[DEBUG] 收益计算详情:")
-        for ts in strategy_daily.index[:5]:  # 只显示前5个
-            long_ret = long_daily.get(ts, 0)
-            short_ret = short_daily.get(ts, 0)
-            strat_ret = strategy_daily.get(ts, 0)
-            print(f"  {ts}: LONG={long_ret:+.4f} | SHORT={short_ret:+.4f} | STRATEGY={strat_ret:+.4f}")
-        print()
         
         # 8. 打印交易细节 (如果启用)
         if args.details:
@@ -171,12 +163,6 @@ def run_backtest():
         total_spy_ret = cum_spy.iloc[-1] - 1 if len(cum_spy) > 0 else 0
         total_qqq_ret = cum_qqq.iloc[-1] - 1 if len(cum_qqq) > 0 else 0
         
-        # 调试累积收益
-        print(f"[DEBUG] 累积收益序列:")
-        print(f"  strategy_daily: {strategy_daily.tolist()}")
-        print(f"  cum_strategy: {cum_strategy.tolist()}")
-        print(f"  最终累积收益: {total_strategy_ret:.4%}")
-        print()
         
         # 最大回撤
         roll_max = cum_strategy.cummax()

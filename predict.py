@@ -101,34 +101,27 @@ def run_hierarchical_prediction():
     l2_features = [c for c in l2_latest.columns if c not in l2_exclude]
     
     l2_latest['rank_score'] = l2_model.predict(l2_latest[l2_features])
-    top_stocks = l2_latest.sort_values('rank_score', ascending=False).head(3)
-    bottom_stocks = l2_latest.sort_values('rank_score', ascending=True).head(3)
+    all_ranked = l2_latest.sort_values('rank_score', ascending=False)
     
     print(f"🕒 基于 K 线时刻: {last_h_ts}")
     print("-" * 50)
-    print("📈 做多建议 (Top 3):")
     print(f"{'排名':<4} | {'代码':<8} | {'价格':<10} | {'相对强度得分'}")
     print("-" * 50)
-    for i, (_, row) in enumerate(top_stocks.iterrows()):
-        print(f"{i+1:<4} | {row['symbol']:<8} | {row['close']:<10.2f} | {row['rank_score']:.4f}")
-    
-    print("\n" + "-" * 50)
-    print("📉 做空建议 (Bottom 3):")
-    print(f"{'排名':<4} | {'代码':<8} | {'价格':<10} | {'相对强度得分'}")
-    print("-" * 50)
-    for i, (_, row) in enumerate(bottom_stocks.iterrows()):
-        print(f"{i+1:<4} | {row['symbol']:<8} | {row['close']:<10.2f} | {row['rank_score']:.4f}")
+    for i, (_, row) in enumerate(all_ranked.iterrows()):
+        icon = "📈" if row['rank_score'] > 0 else "📉"
+        print(f"{i+1:<4} | {row['symbol']:<8} | {row['close']:<10.2f} | {row['rank_score']:.4f} {icon}")
     
     # ---------------------------------------------------------
     # L3: Execution Signal
     # ---------------------------------------------------------
-    print("\n[L3: 执行信号检测] (针对 Top 3)...")
+    print("\n[L3: 执行信号检测] (针对所有标的)...")
     l3_trainer = SignalClassifierTrainer()
     l3_model = l3_trainer.load("models/artifacts/l3_execution.joblib")
     
-    top_3_symbols = top_stocks['symbol'].tolist()
+    # 获取所有在 L2 中出现的标的
+    all_l2_symbols = l2_latest['symbol'].tolist()
     l3_start = target_dt - timedelta(days=10)
-    df_l3_raw = provider.fetch_bars(top_3_symbols, TimeFrame(15, TimeFrameUnit.Minute), l3_start, target_dt + timedelta(days=1))
+    df_l3_raw = provider.fetch_bars(all_l2_symbols, TimeFrame(15, TimeFrameUnit.Minute), l3_start, target_dt + timedelta(days=1))
     df_l3_feats = l2_builder.add_all_features(df_l3_raw, is_training=False)
     
     # 确定 target_dt 之前最后完整 15m 线
