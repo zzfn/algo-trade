@@ -1,5 +1,5 @@
 # 使用 python:3.11-slim 作为基础镜像
-FROM python:3.11-slim-bookworm
+FROM python:3.11-slim
 
 # 设置时区为中国标准时间
 ENV TZ=Asia/Shanghai
@@ -20,7 +20,7 @@ WORKDIR /app
 
 # 复制依赖文件并安装依赖
 COPY pyproject.toml uv.lock ./
-RUN uv sync --no-install-project
+RUN uv sync --locked --no-install-project
 
 # 复制项目代码并安装项目
 COPY . .
