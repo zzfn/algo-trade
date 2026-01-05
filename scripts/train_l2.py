@@ -4,7 +4,7 @@ from data.provider import DataProvider
 from features.technical import FeatureBuilder
 from models.trainer import RankingModelTrainer
 from models.constants import get_feature_columns
-from alpaca.data.timeframe import TimeFrame
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 import os
 
@@ -15,20 +15,22 @@ def train_l2_model():
     
     # 1. 获取 1 年的小时线数据
     # 截止日期固定为 2024-12-31，2025 年数据用于样本外验证
-    # L2: 截面选股模型 (Cross-sectional Stock Selection)
+    # L2: 截面选股模型 (15分钟级别)
     end_date = datetime(2024, 12, 31)
     start_date = end_date - timedelta(days=365)
     
     symbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'AVGO', 'MU', 'AMD', 'ORCL', 'INTC']
     print(f"Fetching data for {len(symbols)} stocks for L2 ranking...")
     
-    df_raw = provider.fetch_bars(symbols, TimeFrame.Hour, start_date, end_date)
+    # 改为 15分钟线
+    df_raw = provider.fetch_bars(symbols, TimeFrame(15, TimeFrameUnit.Minute), start_date, end_date)
     print(f"Raw data rows: {len(df_raw)}")
     
     # 2. 构建特征和排名标签
     print("Building features and rank targets...")
     df = builder.add_all_features(df_raw, is_training=True)
-    df = builder.add_rank_target(df, horizon=5)
+    # 预测未来 1小时 (4 * 15m) 的相对强弱
+    df = builder.add_rank_target(df, horizon=4)
     
     # 3. 准备特征列
     feature_cols = get_feature_columns(df)

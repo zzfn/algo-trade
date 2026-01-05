@@ -57,9 +57,9 @@ class StrategyEngine:
             results['l1_safe'] = prob > L1_SAFE_THRESHOLD
             results['l1_prob'] = prob
 
-        # --- L2: Stock Selection ---
+        # --- L2: Stock Selection (15min) ---
         l2_start = target_dt - timedelta(days=L2_LOOKBACK_DAYS)
-        df_l2_raw = self.provider.fetch_bars(self.l2_symbols, TimeFrame.Hour, l2_start, target_dt + timedelta(days=1))
+        df_l2_raw = self.provider.fetch_bars(self.l2_symbols, TimeFrame(15, TimeFrameUnit.Minute), l2_start, target_dt + timedelta(days=1))
         df_l2_feats = self.l2_builder.add_all_features(df_l2_raw, is_training=False)
         l2_valid = df_l2_feats[df_l2_feats['timestamp'] <= target_dt]
         
