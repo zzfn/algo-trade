@@ -1,4 +1,4 @@
-.PHONY: train-l1 train-l2 train-l3 train-l4 backtest predict trade help setup clean
+.PHONY: train-l1 train-l2 train-l3 train-l4 backtest predict trade help setup clean inspect-models
 
 # 默认目标
 help:
@@ -7,6 +7,7 @@ help:
 	@echo "  make train-l2      - 训练 L2 选股模型 (Ranker)"
 	@echo "  make train-l3      - 训练 L3 趋势模型 (Trend)"
 	@echo "  make train-l4      - 训练 L4 风控模型 (Risk Management)"
+	@echo "  make inspect-models- 分析各层模型特征重要性"
 	@echo "  make predict       - 运行四层架构层级预测 (Real-time)"
 	@echo "  make backtest-l1   - 回测 L1 (Macro / Market Timing)"
 	@echo "  make backtest-l2   - 回测 L2 (Stock Selection)"
@@ -29,6 +30,10 @@ train-l3:
 
 train-l4:
 	PYTHONPATH=. uv run python scripts/train_l4.py
+
+# 分析命令
+inspect-models:
+	PYTHONPATH=. uv run python scripts/inspect_features.py
 
 # 预测命令
 predict:

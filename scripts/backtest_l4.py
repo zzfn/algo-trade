@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from models.engine import StrategyEngine
-from models.constants import L2_SYMBOLS, get_feature_columns, TOP_N_TRADES
+from models.constants import L2_SYMBOLS, get_feature_columns, TOP_N_TRADES, get_allocation_by_return
 from utils.logger import setup_logger
 
 load_dotenv()
@@ -27,11 +27,6 @@ def run_l4_backtest(days=60):
     # 获取 5m 数据以更精确模拟盘中价格行为 (SMC 需要 High/Low)
     fetch_start = start_date - timedelta(days=10) # buffer
     
-    # 我们不仅需要测试 仓位管理 (Allocation)，还需要测试 SMC 风控 (SL/TP)
-    # 对比策略:
-    # A. 基准: 固定仓位 (10%), 固定止盈止损 (TP 5%, SL 2%)
-    # B. L4策略: 动态仓位 (基于预测收益), SMC 动态止盈止损
-    
     results = []
     
     for sym in test_symbols:
@@ -40,8 +35,7 @@ def run_l4_backtest(days=60):
         if df.empty:
             continue
             
-        # 构造日线级别的特征用于 L4 预测 (通常 L4 基于日线或小时线特征预测收益)
-        # 这里为了简化，我们每隔 4 小时做一次决策
+        # 构造日线级别的特征
         df = engine.l2_builder.add_all_features(df, is_training=False)
         df = df[df['timestamp'] >= start_date].reset_index(drop=True)
         
@@ -52,11 +46,11 @@ def run_l4_backtest(days=60):
         pos_a = None
         pos_b = None
         
-        # 为了加速，简化循环：每 4 小时尝试开仓
-        # 实际上应该用 event-driven，这里用简单的时间步进
+        # 统计 L4 交易详情
+        l4_trade_count = 0
+        l4_avg_alloc = 0.0
         
-        # 重新采样到 1h 进行决策，但用 5m 数据进行撮合？
-        # 简化: 直接遍历 5m 数据，每 12 根 bar (1小时) 检查一次开仓信号
+        # 简化循环：每 12 根 bar (1小时) 检查一次开仓信号
         # 假设总是做多 (为了测试风控能力，忽略择时)
         
         for i in range(0, len(df), 12):
@@ -66,80 +60,83 @@ def run_l4_backtest(days=60):
             ts = bar['timestamp']
             price = bar['close']
             
-            # --- 策略 A: 固定 ---
+            # --- 策略 A: 固定 10% 仓位, 5% TP, 2% SL ---
             if pos_a is None:
-                # 开仓
-                size = int((10000 * 0.1) / price) # 假设总资金恒定 10k 计算仓位
+                size = int((10000 * 0.1) / price)
                 tp = price * 1.05
                 sl = price * 0.98
                 pos_a = {'entry': price, 'size': size, 'tp': tp, 'sl': sl, 'ts': ts}
             
             # --- 策略 B: L4 动态 ---
             if pos_b is None:
-                # 预测收益
-                # 构造单行 DataFrame
-                cols = get_feature_columns(df)
+                # 构造单行 DataFrame 用于预测
                 l2_df = pd.DataFrame([bar])
                 
-                # 1. 动态仓位
-                alloc = engine.get_allocation(sym, l2_df)
+                # 1. 动态仓位 (Debug)
+                pred_ret = engine.predict_return(sym, l2_df)
+                alloc = get_allocation_by_return(pred_ret)
+                
                 target_val = 10000 * alloc
                 size_b = int(target_val / price)
                 
-                # 2. SMC 风控
-                risk = engine.get_risk_params(sym, 'long', l2_df)
-                if risk:
-                    tp_b = risk['take_profit']
-                    sl_b = risk['stop_loss']
-                    pos_b = {'entry': price, 'size': size_b, 'tp': tp_b, 'sl': sl_b, 'ts': ts}
+                if size_b > 0:
+                    # 2. SMC 风控
+                    risk = engine.get_risk_params(sym, 'long', l2_df)
+                    if risk:
+                        tp_b = risk['take_profit']
+                        sl_b = risk['stop_loss']
+                        pos_b = {'entry': price, 'size': size_b, 'tp': tp_b, 'sl': sl_b, 'ts': ts}
+                        
+                        l4_trade_count += 1
+                        l4_avg_alloc += alloc
+                        
+                        # Debug Log (抽样打印)
+                        if l4_trade_count % 20 == 0:
+                            sl_dist = (risk['stop_loss'] / price) - 1
+                            tp_dist = (risk['take_profit'] / price) - 1
+                            logger.info(f"[{ts}] L4 Trade: Pred={pred_ret:.4%}, Alloc={alloc:.2%}, Size={size_b}, SL={sl_dist:.2%}, TP={tp_dist:.2%}")
             
             # --- 撮合 (检查未来 12 根 5m K线) ---
             chunk = df.iloc[i+1 : i+13]
             
             # Check A
             if pos_a:
-                done = False
                 for _, row in chunk.iterrows():
                     if row['low'] <= pos_a['sl']:
-                        # Stop Loss
                         pnl = (pos_a['sl'] - pos_a['entry']) * pos_a['size']
                         balance_a += pnl
                         pos_a = None
-                        done = True
                         break
                     elif row['high'] >= pos_a['tp']:
-                        # Take Profit
                         pnl = (pos_a['tp'] - pos_a['entry']) * pos_a['size']
                         balance_a += pnl
                         pos_a = None
-                        done = True
                         break
-                # Period end close (Time exit? No, hold until SL/TP for this test)
-                # But to avoid holding forever in this loop, let's say we refresh logic?
-                # For simplicity, keep holding if not hit.
             
             # Check B
             if pos_b:
-                done = False
                 for _, row in chunk.iterrows():
                     if row['low'] <= pos_b['sl']:
                         pnl = (pos_b['sl'] - pos_b['entry']) * pos_b['size']
                         balance_b += pnl
                         pos_b = None
-                        done = True
                         break
                     elif row['high'] >= pos_b['tp']:
                         pnl = (pos_b['tp'] - pos_b['entry']) * pos_b['size']
                         balance_b += pnl
                         pos_b = None
-                        done = True
                         break
         
         # End of symbol loop
+        l4_avg_alloc = l4_avg_alloc / l4_trade_count if l4_trade_count > 0 else 0
+        logger.info(f"{sym} Summary: L4 Trades={l4_trade_count}, AvgAlloc={l4_avg_alloc:.2%}, FixedPnL=${balance_a-10000:.2f}, L4PnL=${balance_b-10000:.2f}")
+        
         results.append({
             'symbol': sym,
             'fixed_pnl': balance_a - 10000,
-            'l4_pnl': balance_b - 10000
+            'l4_pnl': balance_b - 10000,
+            'l4_trades': l4_trade_count,
+            'l4_avg_alloc': l4_avg_alloc
         })
 
     print("\n" + "="*60)
@@ -148,9 +145,9 @@ def run_l4_backtest(days=60):
     print(f"回测区间: {start_date.date()} ~ {end_date.date()}")
     print(f"对比策略: 固定 10%仓位+2%/5%止损盈 VS L4动态仓位+SMC止损盈")
     
-    print("-" * 60)
-    print(f"{'标的':<6} | {'固定策略 PnL':<15} | {'L4 策略 PnL':<15} | {'差异':<10}")
-    print("-" * 60)
+    print("-" * 80)
+    print(f"{'标的':<6} | {'固定 PnL':<12} | {'L4 PnL':<12} | {'L4 交易数':<10} | {'L4 平均仓位':<12} | {'差异':<10}")
+    print("-" * 80)
     
     total_fixed = 0
     total_l4 = 0
@@ -159,10 +156,10 @@ def run_l4_backtest(days=60):
         total_fixed += res['fixed_pnl']
         total_l4 += res['l4_pnl']
         icon = "✅" if diff > 0 else "❌"
-        print(f"{res['symbol']:<6} | ${res['fixed_pnl']:<14.2f} | ${res['l4_pnl']:<14.2f} | {icon} {diff:+.2f}")
+        print(f"{res['symbol']:<6} | ${res['fixed_pnl']:<11.2f} | ${res['l4_pnl']:<11.2f} | {res['l4_trades']:<10} | {res['l4_avg_alloc']:<12.1%} | {icon} {diff:+.2f}")
         
-    print("-" * 60)
-    print(f"总计   | ${total_fixed:<14.2f} | ${total_l4:<14.2f} | {total_l4 - total_fixed:+.2f}")
+    print("-" * 80)
+    print(f"总计   | ${total_fixed:<11.2f} | ${total_l4:<11.2f} | {'-':<10} | {'-':<12} | {total_l4 - total_fixed:+.2f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

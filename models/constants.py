@@ -22,11 +22,12 @@ TOP_N_TRADES = 3             # 每轮选择 top_n 个高置信度标的进行交
 MAX_POSITIONS = 5            # 最大持仓数限制
 
 # --- 动态仓位分配 (基于预期收益) ---
+# 调整：降低门槛以适应短线预测的低绝对收益值
 ALLOCATION_TIERS = [
-    (0.05, 0.15),   # 预期收益 > 5% → 分配 15%
-    (0.02, 0.10),   # 预期收益 > 2% → 分配 10%
-    (0.01, 0.05),   # 预期收益 > 1% → 分配 5%
-    (0.00, 0.02),   # 预期收益 > 0% → 分配 2%
+    (0.010, 0.15),   # 预期收益 > 1.0% → 分配 15% (激进)
+    (0.005, 0.10),   # 预期收益 > 0.5% → 分配 10% (基准)
+    (0.002, 0.05),   # 预期收益 > 0.2% → 分配 5%
+    (0.000, 0.02),   # 预期收益 > 0.0% → 分配 2%
 ]
 MIN_ALLOCATION = 0.02        # 最小仓位
 MAX_ALLOCATION = 0.15        # 最大仓位
@@ -88,4 +89,3 @@ def get_allocation_by_return(predicted_return: float) -> float:
         if predicted_return > threshold:
             return allocation
     return MIN_ALLOCATION
-

@@ -14,7 +14,7 @@ load_dotenv()
 logger = setup_logger("l2_backtest")
 
 def run_l2_backtest(days=90, top_n=3):
-    logger.info(f"🚀 开始 L2 (选股) 回测, 回溯 {days} 天, Top {top_n}")
+    logger.info(f"🚀 开始 L2 (选股) 回测, 回溯 {days} 天, Top/Bottom {top_n}")
     
     engine = StrategyEngine()
     
@@ -24,8 +24,6 @@ def run_l2_backtest(days=90, top_n=3):
     
     # 1. 获取数据 (所有 L2 标的)
     logger.info(f"获取 {len(L2_SYMBOLS)} 个标的数据...")
-    # 使用 1h 数据进行选股 (模拟每小时或每日重平衡，这里假设每日做一次 rank)
-    # 为了简化，我们只在每天收盘时做一次 Rank，持有到第二天收盘
     
     all_dfs = []
     for sym in L2_SYMBOLS:
@@ -42,94 +40,123 @@ def run_l2_backtest(days=90, top_n=3):
     
     # 2. 预测 Rank
     logger.info("计算 Rank 分数...")
-    # 只取这就按周期内的数据
     test_df = full_df[full_df['timestamp'] >= start_date].copy()
     
     if test_df.empty:
         logger.error("测试区间无数据")
         return
 
-    # 批量预测以加速
+    # 批量预测
     cols = get_feature_columns(test_df)
     test_df['rank_score'] = engine.l2_model.predict(test_df[cols])
     
-    # 3. 每日模拟
-    # 按天聚合，取每天最后一个小时的数据作为"截面"进行选股
+    # 3. 每日模拟 (T日收盘预测 -> T+1日 开盘进 -> T+1日 收盘出)
     test_df['date'] = test_df['timestamp'].dt.date
     dates = sorted(test_df['date'].unique())
     
-    portfolio_value = 10000.0 # 初始净值
+    # 初始资金分配
+    initial_balance = 10000.0
+    balance = initial_balance
+    
     history = []
     
-    logger.info("开始按日回测...")
-    
-    prev_date = None
+    logger.info("开始按日回测 (Long Top N vs Short Bottom N)...")
+    logger.info("交易模式: T日收盘信号 -> T+1日 Open开仓 -> T+1日 Close平仓 (日内)")
     
     for i in range(len(dates) - 1):
-        curr_date = dates[i]
-        next_date = dates[i+1]
+        curr_date = dates[i]   # Signal Date
+        next_date = dates[i+1] # Execution Date
         
-        # 获取当日(curr_date)收盘前的截面数据
+        # --- Signal Generation (Day T Close) ---
         day_df = test_df[test_df['date'] == curr_date]
-        # 取每个 symbol 当天最后一条记录
+        # 取每个 symbol 当天最后一条记录作为"收盘决策点"
         dataset = day_df.sort_values('timestamp').groupby('symbol').tail(1)
         
-        # 选股
+        # Rank
         ranked = dataset.sort_values('rank_score', ascending=False)
-        top_picks = ranked.head(top_n)['symbol'].tolist()
+        symbols = ranked['symbol'].tolist()
         
-        # 计算次日收益
-        # 获取选中的股票在 next_date 的收益
-        # 简单计算: (Next Close - Curr Close) / Curr Close
-        # 更严谨: (Next Open -> Next Close) 或者 (Curr Close -> Next Close)
-        # 这里假设: Curr Close 买入, Next Close 卖出 (持有一天)
+        if len(symbols) < top_n * 2:
+            continue
+            
+        long_picks = symbols[:top_n]
+        short_picks = symbols[-top_n:]
         
-        daily_pnl = 0.0
-        
+        # --- Execution (Day T+1 Intraday) ---
         next_day_df = test_df[test_df['date'] == next_date]
-        next_dataset = next_day_df.sort_values('timestamp').groupby('symbol').tail(1)
         
-        positions = 0
-        for sym in top_picks:
-            try:
-                curr_price = dataset[dataset['symbol'] == sym]['close'].values[0]
-                # 找到次日价格
-                next_rows = next_dataset[next_dataset['symbol'] == sym]
-                if next_rows.empty:
-                    continue
-                next_price = next_rows['close'].values[0]
-                
-                ret = (next_price - curr_price) / curr_price
-                daily_pnl += ret
-                positions += 1
-            except Exception as e:
-                pass
+        daily_long_ret = 0.0
+        daily_short_ret = 0.0
+        long_count = 0
+        short_count = 0
         
-        avg_ret = daily_pnl / positions if positions > 0 else 0
-        portfolio_value *= (1 + avg_ret)
+        # Calculate Long Returns
+        for sym in long_picks:
+            sym_df = next_day_df[next_day_df['symbol'] == sym].sort_values('timestamp')
+            if sym_df.empty: continue
+            
+            # Open at first bar, Close at last bar
+            open_price = sym_df.iloc[0]['open']
+            close_price = sym_df.iloc[-1]['close']
+            
+            ret = (close_price - open_price) / open_price
+            daily_long_ret += ret
+            long_count += 1
+            
+        # Calculate Short Returns (Selling at Open, Buying back at Close)
+        for sym in short_picks:
+            sym_df = next_day_df[next_day_df['symbol'] == sym].sort_values('timestamp')
+            if sym_df.empty: continue
+            
+            open_price = sym_df.iloc[0]['open']
+            close_price = sym_df.iloc[-1]['close']
+            
+            # Short Return: (Open - Close) / Open
+            ret = (open_price - close_price) / open_price
+            daily_short_ret += ret
+            short_count += 1
+            
+        avg_long = daily_long_ret / long_count if long_count > 0 else 0
+        avg_short = daily_short_ret / short_count if short_count > 0 else 0
+        
+        # 假设 50/50 资金分配 (不做杠杆，Long和Short各占一半仓位)
+        # 或者 Long 100% + Short 100% (Market Neutral 杠杆)? 
+        # 简单起见: Total Ret = (Avg Long + Avg Short) / 2
+        total_ret = (avg_long + avg_short) / 2
+        
+        balance *= (1 + total_ret)
         
         history.append({
             'date': next_date, 
-            'value': portfolio_value, 
-            'daily_ret': avg_ret,
-            'picks': top_picks
+            'value': balance, 
+            'daily_ret': total_ret,
+            'long_ret': avg_long,
+            'short_ret': avg_short,
+            'longs': long_picks,
+            'shorts': short_picks
         })
     
     # 结果
+    if not history:
+        logger.warning("无交易记录")
+        return
+
     res_df = pd.DataFrame(history)
-    total_ret = res_df['value'].iloc[-1] / 10000.0 - 1
+    total_ret = res_df['value'].iloc[-1] / initial_balance - 1
     
     print("\n" + "="*60)
     print("📊 L2 选股模型 (Ranker) 回测结果")
     print("="*60)
     print(f"回测区间: {dates[0]} ~ {dates[-1]}")
-    print(f"选股策略: 每日收盘持有 Top {top_n}")
+    print(f"模式: T+1 Open -> Close (日内), Long Top {top_n} & Short Bottom {top_n}")
     print(f"累计收益: {total_ret:+.2%}")
     print(f"日均收益: {res_df['daily_ret'].mean():+.2%}")
+    print(f"日均做多: {res_df['long_ret'].mean():+.2%}")
+    print(f"日均做空: {res_df['short_ret'].mean():+.2%}")
     
     print("-" * 60)
-    print("最近 5 天持仓与收益:")
-    print(res_df.tail())
+    print("最近 5 天绩效:")
+    print(res_df[['date', 'value', 'daily_ret', 'long_ret', 'short_ret']].tail())
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

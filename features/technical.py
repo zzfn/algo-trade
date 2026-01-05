@@ -233,7 +233,7 @@ class FeatureBuilder:
             # 空头洗盘 (Bearish Shakeout): 高点破了 local_high，但收盘跌回到 local_high 之下
             group['shakeout_bear'] = ((group['high'] > group['local_high']) & (group['close'] < group['local_high'])).astype(int)
             
-            return group[['shakeout_bull', 'shakeout_bear']]
+            return group[['shakeout_bull', 'shakeout_bear', 'local_high', 'local_low']]
 
         shakeouts = df.groupby('symbol', group_keys=False).apply(detect_shakeout, include_groups=False)
         df = pd.concat([df, shakeouts], axis=1)
@@ -286,7 +286,6 @@ class FeatureBuilder:
         df = df.groupby('symbol', group_keys=False).apply(calculate_risk_targets)
         
         return df
-
 
 if __name__ == "__main__":
     # Test with multi-symbol dummy data
