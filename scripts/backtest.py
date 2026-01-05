@@ -125,8 +125,8 @@ def run_backtest():
         short_daily = -df_test[df_test['position'] == 'SHORT'].groupby('timestamp')['target_return'].mean()
         
         # 多空对冲策略收益 = (做多收益 + 做空收益) / 2
-        # 注意: 这里改为相加,因为 short_daily 已经取反
-        strategy_daily = ((long_daily.fillna(0) + short_daily.fillna(0)) / 2)
+        # 使用 align 和 fill_value=0 确保如果某个时刻只有单边信号也能计算
+        strategy_daily = long_daily.add(short_daily, fill_value=0) / 2
         
         # 调试输出
         print("\n[DEBUG] 收益计算详情:")
@@ -156,9 +156,14 @@ def run_backtest():
         qqq_returns = df_test[df_test['symbol'] == 'QQQ'].set_index('timestamp')['target_return']
         
         # 9. 累积收益计算
+        # 修复：删除最后一个 NaN (因为最后一个时间点没有未来收益数据)
+        strategy_daily = strategy_daily.dropna()
+        spy_returns = spy_returns.dropna()
+        qqq_returns = qqq_returns.dropna()
+
         cum_strategy = (1 + strategy_daily).cumprod()
-        cum_spy = (1 + spy_returns.fillna(0)).cumprod()
-        cum_qqq = (1 + qqq_returns.fillna(0)).cumprod()
+        cum_spy = (1 + spy_returns).cumprod()
+        cum_qqq = (1 + qqq_returns).cumprod()
         
         # 指标计算
         # 修复: 使用 iloc[-1] 获取最后的累积收益,而不是 iloc[-2]

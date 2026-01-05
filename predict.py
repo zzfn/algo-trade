@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import pytz
+import argparse
 from data.provider import DataProvider
 from features.macro import L1FeatureBuilder
 from features.technical import FeatureBuilder
@@ -11,9 +12,29 @@ from dotenv import load_dotenv
 
 def run_hierarchical_prediction():
     load_dotenv()
+    
+    # ---------------------------------------------------------
+    # 参数解析
+    # ---------------------------------------------------------
+    parser = argparse.ArgumentParser(description="四层架构量化交易预测系统")
+    parser.add_argument("--date", type=str, help="指定预测时刻 (格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM)", default=None)
+    args = parser.parse_args()
+
     provider = DataProvider()
     ny_tz = pytz.timezone("America/New_York")
-    target_dt = datetime.now(ny_tz).replace(tzinfo=None)
+    
+    if args.date:
+        try:
+            if len(args.date) <= 10:
+                target_dt = datetime.strptime(args.date, "%Y-%m-%d")
+            else:
+                target_dt = datetime.strptime(args.date, "%Y-%m-%d %H:%M")
+            print(f"💡 使用指定历史时刻进行分析: {target_dt} ET")
+        except ValueError:
+            print(f"❌ 日期格式错误: {args.date}。请使用 YYYY-MM-DD 或 YYYY-MM-DD HH:MM")
+            return
+    else:
+        target_dt = datetime.now(ny_tz).replace(tzinfo=None)
     
     print("\n" + "="*70)
     print("四层架构交易系统 (L1 -> L2 -> L3 -> L4) | 分析时刻: {dt} ET".format(dt=target_dt.strftime('%Y-%m-%d %H:%M:%S')))
@@ -33,6 +54,12 @@ def run_hierarchical_prediction():
     df_l1_dict = {sym: provider.fetch_bars(sym, TimeFrame.Day, l1_start, target_dt + timedelta(days=1)) for sym in l1_symbols}
     df_l1_feats = l1_builder.build_l1_features(df_l1_dict)
     
+    # 选取最接近 target_dt 的一条数据
+    df_l1_feats = df_l1_feats[df_l1_feats['timestamp'] <= target_dt]
+    if df_l1_feats.empty:
+        print("❌ 无法获取 L1 择时所需的历史宏观数据。")
+        return
+        
     latest_l1 = df_l1_feats.iloc[-1:]
     l1_features = ['spy_return_1d', 'spy_dist_ma200', 'vixy_level', 'vixy_change_1d', 'tlt_return_5d']
     
@@ -59,14 +86,18 @@ def run_hierarchical_prediction():
     df_l2_raw = provider.fetch_bars(l2_symbols, TimeFrame.Hour, l2_start, target_dt + timedelta(days=1))
     df_l2_feats = l2_builder.add_all_features(df_l2_raw, is_training=False)
     
-    # 筛选有效的截面数据 (最后一次完整小时线)
-    df_l2_feats['is_complete'] = (df_l2_feats['timestamp'] + timedelta(hours=1)) <= target_dt
-    last_h_ts = df_l2_feats[df_l2_feats['is_complete']]['timestamp'].max()
-    l2_latest = df_l2_feats[df_l2_feats['timestamp'] == last_h_ts].copy()
+    # 筛选有效的截面数据 (target_dt 之前最后一次完整小时线)
+    l2_valid = df_l2_feats[df_l2_feats['timestamp'] <= target_dt]
+    if l2_valid.empty:
+        print("❌ 无法获取 L2 选股所需的历史数据。")
+        return
+        
+    last_h_ts = l2_valid['timestamp'].max()
+    l2_latest = l2_valid[l2_valid['timestamp'] == last_h_ts].copy()
     
     l2_exclude = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 
                   'target_return', 'target_rank', 'atr', 'vwap', 'trade_count', 
-                  'max_future_return', 'target_signal', 'local_high', 'local_low', 'is_complete']
+                  'max_future_return', 'target_signal', 'local_high', 'local_low']
     l2_features = [c for c in l2_latest.columns if c not in l2_exclude]
     
     l2_latest['rank_score'] = l2_model.predict(l2_latest[l2_features])
@@ -100,15 +131,19 @@ def run_hierarchical_prediction():
     df_l3_raw = provider.fetch_bars(top_3_symbols, TimeFrame(15, TimeFrameUnit.Minute), l3_start, target_dt + timedelta(days=1))
     df_l3_feats = l2_builder.add_all_features(df_l3_raw, is_training=False)
     
-    # 确定最后完整 15m 线
-    df_l3_feats['is_complete'] = (df_l3_feats['timestamp'] + timedelta(minutes=15)) <= target_dt
-    last_15m_ts = df_l3_feats[df_l3_feats['is_complete']]['timestamp'].max()
-    l3_latest = df_l3_feats[df_l3_feats['timestamp'] == last_15m_ts].copy()
+    # 确定 target_dt 之前最后完整 15m 线
+    l3_valid = df_l3_feats[df_l3_feats['timestamp'] <= target_dt]
+    if l3_valid.empty:
+        print("❌ 无法获取 L3 信号所需的历史数据。")
+        return
+        
+    last_15m_ts = l3_valid['timestamp'].max()
+    l3_latest = l3_valid[l3_valid['timestamp'] == last_15m_ts].copy()
     
     # L3 特征排除 (保留洗盘信号)
     l3_exclude = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 
                   'target_return', 'target_rank', 'atr', 'vwap', 'trade_count', 
-                  'max_future_return', 'target_signal', 'local_high', 'local_low', 'is_complete']
+                  'max_future_return', 'target_signal', 'local_high', 'local_low']
     l3_features = [c for c in l3_latest.columns if c not in l3_exclude]
     
     print(f"输入 L3 特征维度: {len(l3_features)}")
@@ -141,10 +176,8 @@ def run_hierarchical_prediction():
     print("分析总结 (L1 + L2 + L3 + L4)")
     print("="*70)
     
-    # 获取 L3 中得分最高的标的
-    # 处理空 dataframe 的情况
     if l3_latest.empty:
-        print("⚠️ 无法获取实时 L3 信号数据。")
+        print("⚠️ 无法获取 L3 信号数据。")
         return
 
     best_long = l3_latest.sort_values('long_p', ascending=False).iloc[0]
@@ -155,7 +188,6 @@ def run_hierarchical_prediction():
     # 做多建议 L4
     if is_safe and best_long['long_p'] > 0.45:
         symbol = best_long['symbol']
-        # 复用 L2 的小时线特征 (L4 模型是基于小时线训练的)
         feat_row = l2_latest[l2_latest['symbol'] == symbol]
         if not feat_row.empty:
             tp_pct = l4_tp_long.predict(feat_row[l2_features])[0]
