@@ -14,7 +14,8 @@ def train_l2_model():
     builder = FeatureBuilder()
     
     # 1. 获取 1 年的小时线数据
-    end_date = datetime.now()
+    # 截止日期固定为 2024-12-31，2025 年数据用于样本外验证
+    end_date = datetime(2024, 12, 31)
     start_date = end_date - timedelta(days=365)
     
     symbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'AVGO', 'MU', 'AMD', 'ORCL', 'INTC']

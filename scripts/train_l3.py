@@ -13,7 +13,8 @@ def train_l3_model():
     builder = FeatureBuilder()
     
     # 1. 获取 6 个月的 15 分钟线数据
-    end_date = datetime.now()
+    # 截止日期固定为 2024-12-31，2025 年数据用于样本外验证
+    end_date = datetime(2024, 12, 31)
     start_date = end_date - timedelta(days=180)
     
     # 使用与 L2 相同的标的池，保持模型一致性
