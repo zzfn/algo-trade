@@ -57,7 +57,7 @@ FEATURE_EXCLUDE_COLS = [
     'target_tp_long_pct', 'target_sl_long_pct',
     'target_tp_short_pct', 'target_sl_short_pct',
     # 预测输出
-    'rank_score',
+    'rank_score', 'long_p', 'short_p',
 ]
 
 

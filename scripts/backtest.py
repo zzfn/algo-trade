@@ -6,280 +6,386 @@ import numpy as np
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-from data.provider import DataProvider
-from features.technical import FeatureBuilder
-from models.constants import get_feature_columns
 
-# 加载环境变量
+from data.provider import DataProvider
+from features.macro import L1FeatureBuilder
+from features.technical import FeatureBuilder
+from models.engine import StrategyEngine
+from models.constants import (
+    get_feature_columns, 
+    L1_SAFE_THRESHOLD, SIGNAL_THRESHOLD, 
+    MAX_POSITIONS, TOP_N_TRADES
+)
+from utils.logger import setup_logger
+
+logger = setup_logger("backtest")
 load_dotenv()
 
-def run_backtest():
-    parser = argparse.ArgumentParser(description="Mag7 + 指数 排序策略回测工具")
-    parser.add_argument("timeframe", nargs="?", default="1h", help="回测周期 (如 1d, 15m, 1h)")
-    parser.add_argument("--days", type=int, default=365, help="回测天数 (默认 365 天)")
-    parser.add_argument("--top_n", type=int, default=1, help="每天选取排名最高的前 N 个标的")
-    parser.add_argument("--model", help="指定模型文件路径")
-    parser.add_argument("--details", action="store_true", help="打印详细交易记录")
-    parser.add_argument("--symbols", help="指定分析标的，用逗号分隔 (如 AAPL,TSLA,COIN)")
-    
+class Position:
+    def __init__(self, symbol, direction, entry_price, size, tp_price, sl_price, entry_time):
+        self.symbol = symbol
+        self.direction = direction  # 'long' or 'short'
+        self.entry_price = float(entry_price)
+        self.size = int(size)
+        self.tp_price = float(tp_price)
+        self.sl_price = float(sl_price)
+        self.entry_time = entry_time
+        self.status = 'open'  # open, closed
+        self.exit_price = 0.0
+        self.exit_time = None
+        self.exit_reason = None # tp, sl, signal_reversal, time_exit
+        self.pnl = 0.0
+        self.return_pct = 0.0
+
+    def update(self, current_bar, params=None):
+        """
+        检查是否触发离场条件。
+        模拟盘中 High/Low 触发。
+        """
+        if self.status != 'open':
+            return
+
+        high = current_bar['high']
+        low = current_bar['low']
+        close = current_bar['close']
+        ts = current_bar['timestamp']
+
+        # 1. 检查止损 (优先检查)
+        stop_triggered = False
+        if self.direction == 'long':
+            if low <= self.sl_price:
+                stop_triggered = True
+                exec_price = self.sl_price  # 假设刚好在止损价成交 (略乐观，忽略滑点)
+                # 如果开盘直接低开在止损价下方，则以开盘价止损
+                if current_bar['open'] < self.sl_price:
+                    exec_price = current_bar['open']
+        else: # short
+            if high >= self.sl_price:
+                stop_triggered = True
+                exec_price = self.sl_price
+                if current_bar['open'] > self.sl_price:
+                    exec_price = current_bar['open']
+        
+        if stop_triggered:
+            self.close(exec_price, ts, 'stop_loss')
+            return
+
+        # 2. 检查止盈
+        take_profit_triggered = False
+        if self.direction == 'long':
+            if high >= self.tp_price:
+                take_profit_triggered = True
+                exec_price = self.tp_price
+                if current_bar['open'] > self.tp_price:
+                    exec_price = current_bar['open']
+        else: # short
+            if low <= self.tp_price:
+                take_profit_triggered = True
+                exec_price = self.tp_price
+                if current_bar['open'] < self.tp_price:
+                    exec_price = current_bar['open']
+
+        if take_profit_triggered:
+            self.close(exec_price, ts, 'take_profit')
+            return
+            
+    def close(self, price, time, reason):
+        self.status = 'closed'
+        self.exit_price = float(price)
+        self.exit_time = time
+        self.exit_reason = reason
+        
+        if self.direction == 'long':
+            self.pnl = (self.exit_price - self.entry_price) * self.size
+            self.return_pct = (self.exit_price / self.entry_price) - 1
+        else:
+            self.pnl = (self.entry_price - self.exit_price) * self.size
+            self.return_pct = 1 - (self.exit_price / self.entry_price)
+
+class BacktestEngine:
+    def __init__(self, initial_equity=100000.0, top_n=TOP_N_TRADES):
+        self.initial_equity = initial_equity
+        self.equity = initial_equity
+        self.cash = initial_equity
+        self.positions = []  # 活跃持仓
+        self.closed_positions = [] # 历史持仓
+        self.history = [] # 每日净值记录
+        
+        self.engine = StrategyEngine() # 复用 StrategyEngine 加载模型
+        self.top_n = top_n
+        
+        # 缓存数据
+        self.bars = {} # symbol -> dataframe
+        self.market_features = None # L1 dataframe
+        
+    def run(self, symbols, timeframe, start_date, end_date):
+        logger.info(f"🚀 开始回测: {start_date} ~ {end_date} | 初始资金: ${self.initial_equity:,.2f}")
+        
+        # 1. 预加载和预处理数据
+        self._prepare_data(symbols, timeframe, start_date, end_date)
+        
+        # 2. 生成时间轴 (按分钟/小时对齐)
+        timeline = sorted(list(set(t for df in self.bars.values() for t in df['timestamp'])))
+        timeline = [t for t in timeline if t >= start_date]
+        
+        logger.info(f"⏳ 时间步总数: {len(timeline)}")
+        
+        # 3. 主循环
+        for current_ts in timeline:
+            self._process_bar(current_ts)
+            
+        # 4. 生成报告
+        self._generate_report(timeframe)
+
+    def _prepare_data(self, symbols, timeframe, start_date, end_date):
+        logger.info("📥 正在预加载数据与特征...")
+        
+        # L1 数据 (已移除 L1 择时，此处不再加载)
+        # l1_start = start_date - timedelta(days=365)
+        # df_l1_dict = {sym: self.engine.provider.fetch_bars(sym, TimeFrame.Day, l1_start, end_date) for sym in self.engine.l1_symbols}
+        # self.market_features = self.engine.l1_builder.build_l1_features(df_l1_dict)
+        
+        # L2/3/4 数据 (这里简化：直接用主回测周期的数据计算特征，假设 timeframe 足够细)
+        # 注意：这里我们直接用传入的 timeframe 作为主驱动周期
+        fetch_start = start_date - timedelta(days=60) # 预留指标计算窗口
+        
+        for sym in symbols:
+            df = self.engine.provider.fetch_bars([sym], timeframe, fetch_start, end_date)
+            if not df.empty:
+                # 预计算所有特征 (L2/L3/L4 需要的)
+                df = self.engine.l2_builder.add_all_features(df, is_training=False)
+                # 预计算 L2 得分 (提速)
+                cols = get_feature_columns(df)
+                df['rank_score'] = self.engine.l2_model.predict(df[cols])
+                
+                # 预计算 L3 概率 (已移除 L3 信号过滤，跳过计算)
+                # probs = self.engine.l3_model.predict_proba(df[cols])
+                # df['long_p'] = probs[:, 1]
+                # df['short_p'] = probs[:, 2]
+                
+                # 为了后续逻辑兼容，填充 dummy 值
+                df['long_p'] = 0.99 
+                df['short_p'] = 0.99
+                
+                # 仅保留回测所需列以节省内存，但在回测时需要用整行数据计算 risk
+                # df = df[['timestamp', 'open', 'high', 'low', 'close', 'rank_score', 'long_p', 'short_p', ...]]
+                self.bars[sym] = df
+        
+        logger.info(f"✅ 数据准备完成。覆盖 {len(self.bars)} 个标的。")
+
+    def _process_bar(self, current_ts):
+        # 1. 获取当前时刻的所有标的数据
+        current_bars = {}
+        for sym, df in self.bars.items():
+            # 找到当前时刻或最近的前一个时刻的数据 (Forward Fill)
+            # 这里简单处理：只取精确匹配当前时刻的数据
+            row = df[df['timestamp'] == current_ts]
+            if not row.empty:
+                current_bars[sym] = row.iloc[0]
+        
+        if not current_bars:
+            return
+
+        # 2. 检查现有持仓 (止盈止损)
+        active_positions = []
+        for pos in self.positions:
+            if pos.symbol in current_bars:
+                # 更新状态 (检查 SL/TP)
+                pos.update(current_bars[pos.symbol])
+                
+                if pos.status == 'closed':
+                    self.cash += pos.exit_price * pos.size
+                    self.closed_positions.append(pos)
+                    logger.debug(f"平仓 {pos.symbol} ({pos.direction}): {pos.exit_reason} | PnL: ${pos.pnl:.2f} ({pos.return_pct:.2%})")
+                else:
+                    active_positions.append(pos)
+            else:
+                active_positions.append(pos) # 数据缺失，保持持仓不变
+        self.positions = active_positions
+
+        # 3. 市场环境判断 (L1) - SIMPLIFIED: 始终假设安全
+        is_safe = True
+
+        # 4. 信号生成与开仓 (仅当现金充足且未满仓)
+        if len(self.positions) < MAX_POSITIONS:
+            # 收集所有标的的 L2 rank 和 L3 signal
+            candidates = []
+            for sym, bar in current_bars.items():
+                # 过滤掉已有持仓的标的
+                if any(p.symbol == sym for p in self.positions):
+                    continue
+                
+                # 简化版逻辑：只看 rank_score
+                # Top N 个做多，Bottom N 个做空 (如果 rank_score 足够低)
+
+                candidates.append({'sym': sym, 'dir': 'long', 'score': bar['rank_score'], 'bar': bar})
+                # 同时加入做空候选 (score 取反，用于统一排序 - score越低做空优先级越高)
+                candidates.append({'sym': sym, 'dir': 'short', 'score': -bar['rank_score'], 'bar': bar})
+            
+            # 按置信度排序，取 Top N
+            candidates.sort(key=lambda x: x['score'], reverse=True)
+            top_picks = candidates[:self.top_n]
+            
+            for pick in top_picks:
+                if len(self.positions) >= MAX_POSITIONS:
+                    break
+                if self.cash <= 0:
+                    break
+                    
+                sym = pick['sym']
+                direction = pick['dir']
+                bar = pick['bar']
+                price = bar['close']
+                
+                # 5. 风控参数与动态仓位 (L4 + SMC)
+                # 构造一个临时的 DataFrame 用于 L4 预测 (需要特征列)
+                # bar 是 Series, 转为 DataFrame
+                l2_df = pd.DataFrame([bar])
+                
+                # 动态仓位
+                allocation = self.engine.get_allocation(sym, l2_df)
+                # SMC 止盈止损
+                risk = self.engine.get_risk_params(sym, direction, l2_df)
+                
+                if risk:
+                    target_value = self.equity * allocation
+                    size = int(target_value / price)
+                    
+                    if size > 0 and (size * price) <= self.cash:
+                        new_pos = Position(
+                            sym, direction, price, size, 
+                            risk['take_profit'], risk['stop_loss'], current_ts
+                        )
+                        self.positions.append(new_pos)
+                        self.cash -= price * size
+                        logger.debug(f"开仓 {sym} ({direction}): ${price:.2f} | 仓位 {allocation:.1%} | TP: {risk['take_profit']} | SL: {risk['stop_loss']}")
+
+        # 6. 更新净值记录
+        current_equity = self.cash
+        for pos in self.positions:
+            # 使用当前收盘价估算浮动净值
+            if pos.symbol in current_bars:
+                curr_price = current_bars[pos.symbol]['close']
+                if pos.direction == 'long':
+                    val = curr_price * pos.size
+                else:
+                    # 做空净值计算: 初始市值 + 浮动盈亏
+                    # 简化：做空时借入股票卖出，现金增加，负债增加。
+                    # 这里用：开仓时现金已扣除(作为保证金)，此处加回 (Entry + PnL)
+                    val = (pos.entry_price * pos.size) + (pos.entry_price - curr_price) * pos.size
+                current_equity += val
+            else:
+                # 缺失数据时沿用入场成本估值（保守）
+                current_equity += pos.entry_price * pos.size
+                
+        self.history.append({'timestamp': current_ts, 'equity': current_equity, 'cash': self.cash})
+        self.equity = current_equity
+
+    def _generate_report(self, timeframe):
+        print("\n" + "="*80)
+        print("🏁 回测完成. 生成报告...")
+        print("="*80)
+        
+        df_hist = pd.DataFrame(self.history).set_index('timestamp')
+        if df_hist.empty:
+            print("❌ 无回测数据")
+            return
+            
+        # 计算基础指标
+        total_ret = (self.equity / self.initial_equity) - 1
+        days = (df_hist.index[-1] - df_hist.index[0]).days
+        annual_ret = (1 + total_ret) ** (365 / days) - 1 if days > 0 else 0
+        
+        # 最大回撤
+        roll_max = df_hist['equity'].cummax()
+        dd = df_hist['equity'] / roll_max - 1
+        mdd = dd.min()
+        
+        # 显示当前持仓
+        current_holdings_pnl = 0.0
+        if self.positions:
+            print(f"\n💼 当前持仓 ({len(self.positions)}):")
+            print(f"{'代码':<6} | {'方向':<6} | {'入场价':<10} | {'当前价':<10} | {'浮动盈亏':<10} | {'回报率':<8}")
+            print("-" * 70)
+            for p in self.positions:
+                # 获取该标的最后已知价格
+                last_price = p.entry_price # 默认 (如果没有更新数据)
+                if p.symbol in self.bars:
+                     # 尝试拿最后一根 K 线的收盘价
+                    last_price = self.bars[p.symbol].iloc[-1]['close']
+                
+                if p.direction == 'long':
+                    unrealized_pnl = (last_price - p.entry_price) * p.size
+                    ret = (last_price / p.entry_price) - 1
+                else:
+                    unrealized_pnl = (p.entry_price - last_price) * p.size
+                    ret = 1 - (last_price / p.entry_price)
+                
+                current_holdings_pnl += unrealized_pnl
+                icon = "🟢" if unrealized_pnl > 0 else "🔴"
+                print(f"{p.symbol:<6} | {p.direction:<6} | ${p.entry_price:<9.2f} | ${last_price:<9.2f} | {icon} ${unrealized_pnl:<8.2f} | {ret:<+7.2%}")
+            
+            print(f"当前持仓总浮亏: ${current_holdings_pnl:.2f}")
+
+        # 交易统计
+        all_closed = self.closed_positions
+        if not all_closed:
+            print("⚠️ 期间无平仓交易")
+        else:
+            wins = [p for p in all_closed if p.pnl > 0]
+            losses = [p for p in all_closed if p.pnl <= 0]
+            win_rate = len(wins) / len(all_closed)
+            avg_win = np.mean([p.pnl for p in wins]) if wins else 0
+            avg_loss = np.mean([p.pnl for p in losses]) if losses else 0
+            profit_factor = abs(sum(p.pnl for p in wins) / sum(p.pnl for p in losses)) if losses else float('inf')
+            
+            print(f"📊 资金表现:")
+            print(f"  初始资金: ${self.initial_equity:,.2f}")
+            print(f"  最终权益: ${self.equity:,.2f} ({total_ret:+.2%})")
+            print(f"  年化收益: {annual_ret:+.2%}")
+            print(f"  最大回撤: {mdd:.2%}")
+            
+            print(f"\n🎯 交易统计:")
+            print(f"  总交易数: {len(all_closed)}")
+            print(f"  胜率:     {win_rate:.1%} ({len(wins)} 胜 / {len(losses)} 负)")
+            print(f"  盈亏比:   {profit_factor:.2f}")
+            print(f"  平均盈利: ${avg_win:.2f}")
+            print(f"  平均亏损: ${avg_loss:.2f}")
+            
+            # 显示最近 5 笔交易
+            print(f"\n📝 最近 10 笔交易记录:")
+            print(f"{'时间':<20} | {'代码':<5} | {'方向':<5} | {'PnL':<10} | {'回报率':<8} | {'原因'}")
+            print("-" * 80)
+            for p in all_closed[-10:]:
+                icon = "🟢" if p.pnl > 0 else "🔴"
+                print(f"{str(p.exit_time):<20} | {p.symbol:<5} | {p.direction:<5} | {icon} ${p.pnl:<8.2f} | {p.return_pct:<+7.2%} | {p.exit_reason}")
+                
+        print("="*80)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("timeframe", nargs="?", default="1h")
+    parser.add_argument("--days", type=int, default=90)
+    parser.add_argument("--symbols", help="如 AAPL,TSLA")
+    parser.add_argument("--top_n", type=int, default=TOP_N_TRADES)
     args = parser.parse_args()
     
     if args.symbols:
-        symbols = [s.strip().upper() for s in args.symbols.split(",")]
+        symbols = args.symbols.split(",")
     else:
-        symbols = ["SPY", "QQQ", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"]
-    tf_str = args.timeframe.lower()
+        # 默认使用所有 L2 标的
+        from models.constants import L2_SYMBOLS
+        symbols = L2_SYMBOLS
+        
+    start_date = datetime.now() - timedelta(days=args.days)
+    end_date = datetime.now()
     
-    # 映射周期
-    if tf_str == '1d':
-        timeframe = TimeFrame.Day
-    elif tf_str == '1h':
-        timeframe = TimeFrame.Hour
-    elif tf_str.endswith('m'):
-        try:
-            mins = int(tf_str.replace('m', ''))
-            timeframe = TimeFrame(mins, TimeFrameUnit.Minute)
-        except ValueError:
-            timeframe = TimeFrame.Day
-    else:
-        timeframe = TimeFrame.Day
-
-    if args.model:
-        model_path = args.model
-    else:
-        model_path = f"models/artifacts/mag7_{tf_str}_ranker.joblib"
+    # 转换 timeframe
+    tf_map = {'1h': TimeFrame.Hour, '15m': TimeFrame(15, TimeFrameUnit.Minute), '1d': TimeFrame.Day}
+    tf = tf_map.get(args.timeframe, TimeFrame.Hour)
     
-    if not os.path.exists(model_path):
-        print(f"错误: 找不到模型文件 {model_path}。")
-        if not args.model:
-            print(f"请先运行训练命令 (例如: make train-{tf_str})")
-        return
-
-    print(f"开始对 {len(symbols)} 个标的进行排序回测 (时间标准: 美东时间 ET)...")
-    print(f"配置: 过去 {args.days} 天, Top {args.top_n}")
-    
-    try:
-        # 1. 获取数据
-        provider = DataProvider()
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=args.days + 60)
-        
-        df_raw = provider.fetch_bars(symbols, timeframe, start_date, end_date)
-        
-        if df_raw.empty:
-            print("错误: 未获取到数据。")
-            return
-
-        # 2. 特征工程
-        builder = FeatureBuilder()
-        # is_training=False 不产生 target_rank，只计算指标和 target_return
-        df_features = builder.add_all_features(df_raw, is_training=False)
-        
-        # 过滤回测时段
-        backtest_start = end_date - timedelta(days=args.days)
-        df_test = df_features[df_features['timestamp'] >= backtest_start].copy()
-        
-        if df_test.empty:
-            print("错误: 回测时段内无有效数据。")
-            return
-
-        # 3. 加载模型
-        model = joblib.load(model_path)
-        
-        # 4. 定义特征排除列表 (与训练代码保持一致)
-        feature_cols = get_feature_columns(df_test)
-        print(f"输入特征维度: {len(feature_cols)}")
-        
-        # 5. 执行预测 (获取得分)
-        df_test['score'] = model.predict(df_test[feature_cols])
-        
-        # 6. 核心逻辑：多空策略 - 同时选择得分最高(做多)和最低(做空)的标的
-        def pick_long_short(group):
-            group = group.sort_values('score', ascending=False)
-            group['position'] = 'NONE'
-            # 选择 top_n 做多
-            if len(group) >= args.top_n:
-                group.iloc[:args.top_n, group.columns.get_loc('position')] = 'LONG'
-            # 选择 bottom_n 做空
-            if len(group) >= args.top_n * 2:
-                group.iloc[-args.top_n:, group.columns.get_loc('position')] = 'SHORT'
-            return group
-
-        # 使用更稳健的循环方式避免 FutureWarning 和丢失 timestamp
-        processed_ts = []
-        for ts, group in df_test.groupby('timestamp'):
-            processed = pick_long_short(group)
-            processed['timestamp'] = ts
-            processed_ts.append(processed)
-        df_test = pd.concat(processed_ts).reset_index(drop=True)
-        
-        # 7. 计算多空策略收益
-        # 做多收益 = 持有多头标的的平均收益
-        long_daily = df_test[df_test['position'] == 'LONG'].groupby('timestamp')['target_return'].mean()
-        
-        # 做空收益 = 持有空头标的的平均收益(取反,因为做空时价格下跌=盈利)
-        # 例如: 标的跌 -2% → 做空盈利 +2%
-        short_daily = -df_test[df_test['position'] == 'SHORT'].groupby('timestamp')['target_return'].mean()
-        
-        # 多空对冲策略收益 = (做多收益 + 做空收益) / 2
-        # 使用 align 和 fill_value=0 确保如果某个时刻只有单边信号也能计算
-        strategy_daily = long_daily.add(short_daily, fill_value=0) / 2
-        
-        
-        # 8. 打印交易细节 (如果启用)
-        if args.details:
-            print("\n" + "-"*110)
-            print(f"{'时间 (ET)':<20} | {'方向':<6} | {'代码':<8} | {'收盘价':<10} | {'预测分':<10} | {'标的涨跌':<10} | {'策略收益':<10}")
-            print("-"*110)
-            # 获取所有被选中的行
-            selected_trades = df_test[df_test['position'] != 'NONE'].sort_values('timestamp')
-            for _, row in selected_trades.iterrows():
-                direction_icon = "📈" if row['position'] == 'LONG' else "📉"
-                # 计算策略收益: 做多=标的收益, 做空=标的收益取反
-                strategy_return = row['target_return'] if row['position'] == 'LONG' else -row['target_return']
-                print(f"{str(row['timestamp']):<20} | {direction_icon} {row['position']:<4} | {row['symbol']:<8} | {row['close']:<10.2f} | {row['score']:<10.4f} | {row['target_return']:+10.2%} | {strategy_return:+10.2%}")
-            print("-"*110 + "\n")
-
-        # 9. 基准收益 (SPY 和 QQQ)
-        spy_returns = df_test[df_test['symbol'] == 'SPY'].set_index('timestamp')['target_return']
-        qqq_returns = df_test[df_test['symbol'] == 'QQQ'].set_index('timestamp')['target_return']
-        
-        # 9. 累积收益计算
-        # 修复：删除最后一个 NaN (因为最后一个时间点没有未来收益数据)
-        strategy_daily = strategy_daily.dropna()
-        spy_returns = spy_returns.dropna()
-        qqq_returns = qqq_returns.dropna()
-
-        cum_strategy = (1 + strategy_daily).cumprod()
-        cum_spy = (1 + spy_returns).cumprod()
-        cum_qqq = (1 + qqq_returns).cumprod()
-        
-        # 指标计算
-        # 修复: 使用 iloc[-1] 获取最后的累积收益,而不是 iloc[-2]
-        total_strategy_ret = cum_strategy.iloc[-1] - 1 if len(cum_strategy) > 0 else 0
-        total_spy_ret = cum_spy.iloc[-1] - 1 if len(cum_spy) > 0 else 0
-        total_qqq_ret = cum_qqq.iloc[-1] - 1 if len(cum_qqq) > 0 else 0
-        
-        
-        # 最大回撤
-        roll_max = cum_strategy.cummax()
-        dd = cum_strategy / roll_max - 1
-        mdd = dd.min()
-        
-        # === 新增指标 ===
-        # 1. 胜率 (Win Rate)
-        wins = (strategy_daily > 0).sum()
-        losses = (strategy_daily < 0).sum()
-        total_trades = wins + losses
-        win_rate = wins / total_trades if total_trades > 0 else 0
-        
-        # 2. 盈亏比 (Profit Factor)
-        gross_profit = strategy_daily[strategy_daily > 0].sum()
-        gross_loss = abs(strategy_daily[strategy_daily < 0].sum())
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
-        
-        # 3. 夏普比率 (Sharpe Ratio) - 假设无风险利率为 0
-        daily_mean = strategy_daily.mean()
-        daily_std = strategy_daily.std()
-        # 根据周期调整年化因子
-        if tf_str == '1d':
-            annualization_factor = 252
-        elif tf_str == '1h':
-            annualization_factor = 252 * 6.5  # 每天 6.5 个交易小时
-        elif tf_str.endswith('m'):
-            mins = int(tf_str.replace('m', ''))
-            annualization_factor = 252 * 6.5 * (60 / mins)
-        else:
-            annualization_factor = 252
-        sharpe_ratio = (daily_mean / daily_std * np.sqrt(annualization_factor)) if daily_std > 0 else 0
-        
-        # 4. 年化收益率
-        trading_days = len(strategy_daily)
-        if tf_str == '1d':
-            years = trading_days / 252
-        elif tf_str == '1h':
-            years = trading_days / (252 * 6.5)
-        else:
-            mins = int(tf_str.replace('m', '')) if tf_str.endswith('m') else 60
-            years = trading_days / (252 * 6.5 * (60 / mins))
-        annual_return = (1 + total_strategy_ret) ** (1 / years) - 1 if years > 0 else 0
-        
-        # 5. 平均每笔收益
-        avg_return = strategy_daily.mean()
-        
-        # 6. 最大连续亏损次数
-        losing_streak = 0
-        max_losing_streak = 0
-        for r in strategy_daily:
-            if r < 0:
-                losing_streak += 1
-                max_losing_streak = max(max_losing_streak, losing_streak)
-            else:
-                losing_streak = 0
-        
-        # 7. 卡玛比率 (Calmar Ratio) = 年化收益 / 最大回撤
-        calmar_ratio = annual_return / abs(mdd) if mdd != 0 else float('inf')
-
-        print("\n" + "="*60)
-        print(f"多空策略回测报告: {tf_str} (Long {args.top_n} + Short {args.top_n}) - ET")
-        print(f"时间范围: {cum_strategy.index[0]} 至 {cum_strategy.index[-1]}")
-        print(f"总周期数: {len(cum_strategy)}")
-        print("="*60)
-        
-        print("\n📊 收益指标:")
-        print("-" * 60)
-        print(f"  策略累计收益: {total_strategy_ret:>10.2%}    SPY: {total_spy_ret:>8.2%}    QQQ: {total_qqq_ret:>8.2%}")
-        print(f"  年化收益率:   {annual_return:>10.2%}")
-        print(f"  平均每周期:   {avg_return:>10.4%}")
-        
-        print("\n📉 风险指标:")
-        print("-" * 60)
-        print(f"  最大回撤:     {mdd:>10.2%}")
-        print(f"  波动率 (std): {daily_std:>10.4%}")
-        print(f"  最大连续亏损: {max_losing_streak:>10} 次")
-        
-        print("\n⚖️ 风险调整指标:")
-        print("-" * 60)
-        print(f"  夏普比率:     {sharpe_ratio:>10.2f}")
-        print(f"  卡玛比率:     {calmar_ratio:>10.2f}")
-        print(f"  盈亏比:       {profit_factor:>10.2f}")
-        
-        print("\n🎯 交易统计:")
-        print("-" * 60)
-        print(f"  总交易周期:   {total_trades:>10}")
-        print(f"  盈利周期:     {wins:>10} ({win_rate:.1%})")
-        print(f"  亏损周期:     {losses:>10} ({1-win_rate:.1%})")
-        
-        print("\n" + "="*60)
-        best_benchmark = max(total_spy_ret, total_qqq_ret)
-        if total_strategy_ret > best_benchmark:
-            print(f"结论: 🏆 [策略成功跑赢所有基准!]")
-        elif total_strategy_ret > min(total_spy_ret, total_qqq_ret):
-            print(f"结论: 📈 [策略表现尚可，优于部分基准]")
-        else:
-            print(f"结论: 📉 [策略表现逊于基准，需进一步优化]")
-        
-        # 策略改进建议
-        print("\n💡 调优建议:")
-        if win_rate < 0.5:
-            print("  - 胜率较低，考虑提高信号阈值或增加过滤条件")
-        if profit_factor < 1.5:
-            print("  - 盈亏比偏低，考虑优化止盈止损参数")
-        if sharpe_ratio < 1.0:
-            print("  - 夏普比率不足，收益相对风险偏低")
-        if abs(mdd) > 0.1:
-            print("  - 回撤较大，考虑增加风控或降低仓位")
-        if max_losing_streak > 5:
-            print("  - 连续亏损过多，可能存在趋势判断问题")
-        if win_rate >= 0.5 and profit_factor >= 1.5 and sharpe_ratio >= 1.0:
-            print("  - ✅ 各项指标健康，可考虑扩大回测时间验证稳定性")
-        
-        print("="*60)
-
-    except Exception as e:
-        print(f"回测过程中出错: {e}")
-        import traceback
-        traceback.print_exc()
+    engine = BacktestEngine(top_n=args.top_n)
+    engine.run(symbols, tf, start_date, end_date)
 
 if __name__ == "__main__":
-    run_backtest()
+    main()

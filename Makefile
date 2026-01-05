@@ -36,7 +36,7 @@ trade:
 
 # 回测命令 (保留通用回测脚本支持)
 backtest:
-	PYTHONPATH=. uv run python scripts/backtest.py $(if $(tf),$(tf),1h) --days $(if $(days),$(days),3) --top_n 1 --model $(if $(model),$(model),models/artifacts/l2_stock_selection.joblib) --details
+	PYTHONPATH=. uv run python scripts/backtest.py $(if $(tf),$(tf),1h) --days $(if $(days),$(days),90) --top_n 1
 
 # 环境与清理
 setup:
