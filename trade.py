@@ -7,7 +7,7 @@ import pytz
 from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest, TakeProfitRequest, StopLossRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus, OrderClass
+from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus, OrderClass, QueryOrderStatus
 from models.engine import StrategyEngine
 from models.constants import MAX_POSITIONS, TOP_N_TRADES
 from utils.logger import setup_logger
@@ -36,7 +36,7 @@ class TradingBot:
         return self.trading_client.get_all_positions()
 
     def get_open_orders(self):
-        req = GetOrdersRequest(status=OrderStatus.OPEN)
+        req = GetOrdersRequest(status=QueryOrderStatus.OPEN)
         return self.trading_client.get_orders(req)
 
     def run_iteration(self):
@@ -84,16 +84,17 @@ class TradingBot:
         # 根据最新信号与当前持仓状态，决定是保持、开仓还是反手 (反手需在 manage_positions 平仓后下一轮触发)
         
         # 多头信号 (遍历过滤后的标的)
-        if l1_safe:
-            executed_longs = 0
-            for _, signal in long_signals.iterrows():
-                success = self.execute_trade(signal['symbol'], OrderSide.BUY, "long", all_ranked, price=signal['close'])
-                if success:
-                    executed_longs += 1
-            if executed_longs > 0:
-                logger.info(f"📊 本轮多头交易: 成功执行 {executed_longs} 笔")
-        else:
-            logger.warning("⚠️ L1 Market Safety: UNSAFE (Skipping Longs)")
+        # [Debug] 跳过 L1 限制，强制执行多头
+        if not l1_safe:
+            logger.warning("⚠️ L1 Market Safety: UNSAFE (Ignoring check)")
+
+        executed_longs = 0
+        for _, signal in long_signals.iterrows():
+            success = self.execute_trade(signal['symbol'], OrderSide.BUY, "long", all_ranked, price=signal['close'])
+            if success:
+                executed_longs += 1
+        if executed_longs > 0:
+            logger.info(f"📊 本轮多头交易: 成功执行 {executed_longs} 笔")
 
         # 空头信号 (遍历过滤后的标的)
         executed_shorts = 0

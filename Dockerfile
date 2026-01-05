@@ -3,6 +3,7 @@ FROM python:3.11-slim-bookworm
 
 # 设置时区为中国标准时间
 ENV TZ=Asia/Shanghai
+ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # 复制 uv 二进制文件
