@@ -58,6 +58,24 @@ make train-l4  # 风控管理模型
 make predict
 ```
 
+### 🤖 全自动交易 (Paper Trading)
+
+系统现已支持基于 Alpaca 模拟盘的全自动交易，包含自动止盈止损。
+
+```bash
+# 启动自动交易 (默认 15 分钟/间隔)
+make trade
+
+# 自定义检查间隔
+make trade args="--interval 5"
+```
+
+**特性**:
+
+- **支架订单 (Bracket Orders)**: 入场时自动根据 L4 模型预测挂好 TP/SL 订单。
+- **模拟盘保护**: 强制在 Alpaca Paper Trading 环境运行。
+- **分层过滤**: 仅在 L1 + L3 置信度达标时触发交易。
+
 ### 回测策略
 
 ```bash
