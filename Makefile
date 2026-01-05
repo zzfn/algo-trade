@@ -7,7 +7,7 @@ help:
 	@echo "  make train-l2      - 训练 L2 选股模型 (Ranker)"
 	@echo "  make train-l3      - 训练 L3 执行模型 (Signal)"
 	@echo "  make train-l4      - 训练 L4 风控模型 (Risk Management)"
-	@echo "  make predict       - 运行三层架构层级预测 (Real-time)"
+	@echo "  make predict       - 运行四层架构层级预测 (Real-time)"
 	@echo "  make backtest tf=1h - 运行多空策略回测"
 	@echo "  make setup         - 安装依赖"
 	@echo "  make clean         - 清理输出文件"

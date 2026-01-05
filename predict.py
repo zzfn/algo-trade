@@ -5,7 +5,7 @@ import pytz
 from data.provider import DataProvider
 from features.macro import L1FeatureBuilder
 from features.technical import FeatureBuilder
-from models.trainer import SklearnClassifierTrainer, RankingModelTrainer, SignalClassifierTrainer
+from models.trainer import SklearnClassifierTrainer, RankingModelTrainer, SignalClassifierTrainer, RiskModelTrainer
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 
@@ -16,7 +16,7 @@ def run_hierarchical_prediction():
     target_dt = datetime.now(ny_tz).replace(tzinfo=None)
     
     print("\n" + "="*70)
-    print("三层架构交易系统 (L1 -> L2 -> L3) | 分析时刻: {dt} ET".format(dt=target_dt.strftime('%Y-%m-%d %H:%M:%S')))
+    print("四层架构交易系统 (L1 -> L2 -> L3 -> L4) | 分析时刻: {dt} ET".format(dt=target_dt.strftime('%Y-%m-%d %H:%M:%S')))
     print("="*70)
     
     # ---------------------------------------------------------
@@ -127,21 +127,69 @@ def run_hierarchical_prediction():
         
         print(f"{row['symbol']:<8} | {row['long_p']:<15.2%} | {row['short_p']:<15.2%} | {shake_desc}")
     
+    # ---------------------------------------------------------
+    # L4: Risk Management Integration
+    # ---------------------------------------------------------
+    print("\n[L4: 风控建议计算] ...")
+    l4_trainer = RiskModelTrainer()
+    l4_tp_long = l4_trainer.load("models/artifacts/l4_risk_tp_long.joblib", "tp_long")
+    l4_sl_long = l4_trainer.load("models/artifacts/l4_risk_sl_long.joblib", "sl_long")
+    l4_tp_short = l4_trainer.load("models/artifacts/l4_risk_tp_short.joblib", "tp_short")
+    l4_sl_short = l4_trainer.load("models/artifacts/l4_risk_sl_short.joblib", "sl_short")
+
     print("\n" + "="*70)
-    print("分析总结: ", end="")
+    print("分析总结 (L1 + L2 + L3 + L4)")
+    print("="*70)
+    
+    # 获取 L3 中得分最高的标的
+    # 处理空 dataframe 的情况
+    if l3_latest.empty:
+        print("⚠️ 无法获取实时 L3 信号数据。")
+        return
+
     best_long = l3_latest.sort_values('long_p', ascending=False).iloc[0]
     best_short = l3_latest.sort_values('short_p', ascending=False).iloc[0]
+
+    found_signal = False
     
-    recommendations = []
+    # 做多建议 L4
     if is_safe and best_long['long_p'] > 0.45:
-        recommendations.append(f"🚀 做多 [{best_long['symbol']}] (置信度: {best_long['long_p']:.1%})")
+        symbol = best_long['symbol']
+        # 复用 L2 的小时线特征 (L4 模型是基于小时线训练的)
+        feat_row = l2_latest[l2_latest['symbol'] == symbol]
+        if not feat_row.empty:
+            tp_pct = l4_tp_long.predict(feat_row[l2_features])[0]
+            sl_pct = l4_sl_long.predict(feat_row[l2_features])[0]
+            curr_price = best_long['close']
+            
+            print(f"🚀 [做多建议] 代码: {symbol} | L3 置信度: {best_long['long_p']:.1%}")
+            print(f"   入场参考价: ${curr_price:.2f}")
+            print(f"   止盈目标位: ${curr_price * (1 + tp_pct):.2f} ({tp_pct:+.2%})")
+            print(f"   止损触发位: ${curr_price * (1 + sl_pct):.2f} ({sl_pct:+.2%})")
+            denom = abs(sl_pct) if abs(sl_pct) > 1e-6 else 1e-6
+            print(f"   盈亏比估算: {abs(tp_pct/denom):.2f}:1")
+            found_signal = True
+
+    # 做空建议 L4
     if best_short['short_p'] > 0.45:
-        recommendations.append(f"� 做空 [{best_short['symbol']}] (置信度: {best_short['short_p']:.1%})")
-    
-    if recommendations:
-        print(" | ".join(recommendations))
-    else:
-        print("💡 当前无高置信度入场信号,建议等待或关注洗盘反抽。")
+        if found_signal: print("-" * 40)
+        symbol = best_short['symbol']
+        feat_row = l2_latest[l2_latest['symbol'] == symbol]
+        if not feat_row.empty:
+            tp_pct = l4_tp_short.predict(feat_row[l2_features])[0]
+            sl_pct = l4_sl_short.predict(feat_row[l2_features])[0]
+            curr_price = best_short['close']
+            
+            print(f"📉 [做空建议] 代码: {symbol} | L3 置信度: {best_short['short_p']:.1%}")
+            print(f"   入场参考价: ${curr_price:.2f}")
+            print(f"   止盈目标位: ${curr_price * (1 - tp_pct):.2f} (预期下跌 {tp_pct:.2%})")
+            print(f"   止损触发位: ${curr_price * (1 - sl_pct):.2f} (预期上涨 {-sl_pct:.2%})")
+            denom = abs(sl_pct) if abs(sl_pct) > 1e-6 else 1e-6
+            print(f"   盈亏比估算: {abs(tp_pct/denom):.2f}:1")
+            found_signal = True
+
+    if not found_signal:
+        print("💡 当前无高置信度入场信号，建议等待或关注洗盘/SMC 结构确认。")
     print("="*70 + "\n")
 
 if __name__ == "__main__":
