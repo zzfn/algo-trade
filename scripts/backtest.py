@@ -165,18 +165,92 @@ def run_backtest():
         roll_max = cum_strategy.cummax()
         dd = cum_strategy / roll_max - 1
         mdd = dd.min()
+        
+        # === 新增指标 ===
+        # 1. 胜率 (Win Rate)
+        wins = (strategy_daily > 0).sum()
+        losses = (strategy_daily < 0).sum()
+        total_trades = wins + losses
+        win_rate = wins / total_trades if total_trades > 0 else 0
+        
+        # 2. 盈亏比 (Profit Factor)
+        gross_profit = strategy_daily[strategy_daily > 0].sum()
+        gross_loss = abs(strategy_daily[strategy_daily < 0].sum())
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+        
+        # 3. 夏普比率 (Sharpe Ratio) - 假设无风险利率为 0
+        daily_mean = strategy_daily.mean()
+        daily_std = strategy_daily.std()
+        # 根据周期调整年化因子
+        if tf_str == '1d':
+            annualization_factor = 252
+        elif tf_str == '1h':
+            annualization_factor = 252 * 6.5  # 每天 6.5 个交易小时
+        elif tf_str.endswith('m'):
+            mins = int(tf_str.replace('m', ''))
+            annualization_factor = 252 * 6.5 * (60 / mins)
+        else:
+            annualization_factor = 252
+        sharpe_ratio = (daily_mean / daily_std * np.sqrt(annualization_factor)) if daily_std > 0 else 0
+        
+        # 4. 年化收益率
+        trading_days = len(strategy_daily)
+        if tf_str == '1d':
+            years = trading_days / 252
+        elif tf_str == '1h':
+            years = trading_days / (252 * 6.5)
+        else:
+            mins = int(tf_str.replace('m', '')) if tf_str.endswith('m') else 60
+            years = trading_days / (252 * 6.5 * (60 / mins))
+        annual_return = (1 + total_strategy_ret) ** (1 / years) - 1 if years > 0 else 0
+        
+        # 5. 平均每笔收益
+        avg_return = strategy_daily.mean()
+        
+        # 6. 最大连续亏损次数
+        losing_streak = 0
+        max_losing_streak = 0
+        for r in strategy_daily:
+            if r < 0:
+                losing_streak += 1
+                max_losing_streak = max(max_losing_streak, losing_streak)
+            else:
+                losing_streak = 0
+        
+        # 7. 卡玛比率 (Calmar Ratio) = 年化收益 / 最大回撤
+        calmar_ratio = annual_return / abs(mdd) if mdd != 0 else float('inf')
 
-        print("\n" + "="*50)
+        print("\n" + "="*60)
         print(f"多空策略回测报告: {tf_str} (Long {args.top_n} + Short {args.top_n}) - ET")
         print(f"时间范围: {cum_strategy.index[0]} 至 {cum_strategy.index[-1]}")
         print(f"总周期数: {len(cum_strategy)}")
-        print("-" * 50)
-        print(f"策略累计收益 (Model): {total_strategy_ret:.2%}")
-        print(f"SPY 累计收益 (基准): {total_spy_ret:.2%}")
-        print(f"QQQ 累计收益 (基准): {total_qqq_ret:.2%}")
-        print(f"最大回撤 (Max Drawdown): {mdd:.2%}")
-        print("-" * 50)
+        print("="*60)
         
+        print("\n📊 收益指标:")
+        print("-" * 60)
+        print(f"  策略累计收益: {total_strategy_ret:>10.2%}    SPY: {total_spy_ret:>8.2%}    QQQ: {total_qqq_ret:>8.2%}")
+        print(f"  年化收益率:   {annual_return:>10.2%}")
+        print(f"  平均每周期:   {avg_return:>10.4%}")
+        
+        print("\n📉 风险指标:")
+        print("-" * 60)
+        print(f"  最大回撤:     {mdd:>10.2%}")
+        print(f"  波动率 (std): {daily_std:>10.4%}")
+        print(f"  最大连续亏损: {max_losing_streak:>10} 次")
+        
+        print("\n⚖️ 风险调整指标:")
+        print("-" * 60)
+        print(f"  夏普比率:     {sharpe_ratio:>10.2f}")
+        print(f"  卡玛比率:     {calmar_ratio:>10.2f}")
+        print(f"  盈亏比:       {profit_factor:>10.2f}")
+        
+        print("\n🎯 交易统计:")
+        print("-" * 60)
+        print(f"  总交易周期:   {total_trades:>10}")
+        print(f"  盈利周期:     {wins:>10} ({win_rate:.1%})")
+        print(f"  亏损周期:     {losses:>10} ({1-win_rate:.1%})")
+        
+        print("\n" + "="*60)
         best_benchmark = max(total_spy_ret, total_qqq_ret)
         if total_strategy_ret > best_benchmark:
             print(f"结论: 🏆 [策略成功跑赢所有基准!]")
@@ -185,7 +259,22 @@ def run_backtest():
         else:
             print(f"结论: 📉 [策略表现逊于基准，需进一步优化]")
         
-        print("="*50)
+        # 策略改进建议
+        print("\n💡 调优建议:")
+        if win_rate < 0.5:
+            print("  - 胜率较低，考虑提高信号阈值或增加过滤条件")
+        if profit_factor < 1.5:
+            print("  - 盈亏比偏低，考虑优化止盈止损参数")
+        if sharpe_ratio < 1.0:
+            print("  - 夏普比率不足，收益相对风险偏低")
+        if abs(mdd) > 0.1:
+            print("  - 回撤较大，考虑增加风控或降低仓位")
+        if max_losing_streak > 5:
+            print("  - 连续亏损过多，可能存在趋势判断问题")
+        if win_rate >= 0.5 and profit_factor >= 1.5 and sharpe_ratio >= 1.0:
+            print("  - ✅ 各项指标健康，可考虑扩大回测时间验证稳定性")
+        
+        print("="*60)
 
     except Exception as e:
         print(f"回测过程中出错: {e}")
