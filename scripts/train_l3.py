@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from data.provider import DataProvider
 from features.technical import FeatureBuilder
 from models.trainer import SignalClassifierTrainer
+from models.constants import get_feature_columns
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 
@@ -29,10 +30,7 @@ def train_l3_model():
     df = df.dropna()
     
     # 3. 准备特征列
-    exclude_cols = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 
-                    'target_return', 'target_rank', 'atr', 'vwap', 'trade_count', 
-                    'max_future_return', 'target_signal', 'local_high', 'local_low']
-    feature_cols = [c for c in df.columns if c not in exclude_cols]
+    feature_cols = get_feature_columns(df)
     
     print(f"Training L3 Classifier with {len(feature_cols)} features.")
     

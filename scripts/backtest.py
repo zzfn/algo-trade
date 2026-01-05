@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from data.provider import DataProvider
 from features.technical import FeatureBuilder
+from models.constants import get_feature_columns
 
 # 加载环境变量
 load_dotenv()
@@ -86,11 +87,7 @@ def run_backtest():
         model = joblib.load(model_path)
         
         # 4. 定义特征排除列表 (与训练代码保持一致)
-        exclude_cols = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 
-                        'target_return', 'target_rank', 'atr', 'vwap', 'trade_count', 
-                        'max_future_return', 'target_signal', 'local_high', 'local_low']
-        
-        feature_cols = [c for c in df_test.columns if c not in exclude_cols]
+        feature_cols = get_feature_columns(df_test)
         print(f"输入特征维度: {len(feature_cols)}")
         
         # 5. 执行预测 (获取得分)

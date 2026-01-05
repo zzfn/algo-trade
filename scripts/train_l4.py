@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from data.provider import DataProvider
 from features.technical import FeatureBuilder
 from models.trainer import RiskModelTrainer
+from models.constants import get_feature_columns
 from alpaca.data.timeframe import TimeFrame
 from dotenv import load_dotenv
 import os
@@ -32,12 +33,7 @@ def train_l4_model():
     print(f"Valid training samples: {len(df)}")
     
     # 3. 准备特征列
-    exclude_cols = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume', 
-                    'target_return', 'target_rank', 'atr', 'vwap', 'trade_count', 
-                    'max_future_return', 'target_signal', 'local_high', 'local_low',
-                    'target_tp_long_pct', 'target_sl_long_pct', 
-                    'target_tp_short_pct', 'target_sl_short_pct']
-    feature_cols = [c for c in df.columns if c not in exclude_cols]
+    feature_cols = get_feature_columns(df)
     
     print(f"Training L4 Risk Management models with {len(feature_cols)} features.")
     
