@@ -77,6 +77,12 @@ class TradingBot:
         long_signals = self.engine.filter_signals(l3_signals, direction="long", top_n=self.TOP_N_TRADES)
         short_signals = self.engine.filter_signals(l3_signals, direction="short", top_n=self.TOP_N_TRADES)
 
+        # 4. 持仓管理 (动态止盈止损 / 信号平仓)
+        self.manage_positions(l3_signals)
+
+        # 5. 信号执行 (Signal Execution)
+        # 根据最新信号与当前持仓状态，决定是保持、开仓还是反手 (反手需在 manage_positions 平仓后下一轮触发)
+        
         # 多头信号 (遍历过滤后的标的)
         if l1_safe:
             executed_longs = 0
@@ -98,6 +104,59 @@ class TradingBot:
         if executed_shorts > 0:
             logger.info(f"📊 本轮空头交易: 成功执行 {executed_shorts} 笔")
 
+    def manage_positions(self, l3_signals):
+        """
+        主动管理现有持仓：
+        1. 信号反转 -> 立即平仓 (Exit)
+        2. (TODO) 移动止损
+        """
+        positions = self.get_positions()
+        if not positions:
+            return
+
+        logger.info(f"🔄 正在检查 {len(positions)} 个持仓的动态管理...")
+        
+        from models.constants import SIGNAL_THRESHOLD
+
+        for p in positions:
+            symbol = p.symbol
+            qty = abs(int(p.qty))
+            side = OrderSide.SELL if p.side == 'long' else OrderSide.BUY # 平仓方向
+            entry_price = float(p.avg_entry_price)
+            current_price = float(p.current_price)
+            
+            # --- 1. 信号反转检查 ---
+            # 查找该标的的最新 L3 信号
+            l3_row = l3_signals[l3_signals['symbol'] == symbol]
+            if l3_row.empty:
+                continue
+            
+            l3_data = l3_row.iloc[0]
+            should_close = False
+            reason = ""
+
+            if p.side == 'long':
+                # 持有多头，但出现了强烈的空头信号
+                if l3_data['short_p'] > SIGNAL_THRESHOLD:
+                    should_close = True
+                    reason = f"信号反转 (Short Prob {l3_data['short_p']:.2f} > {SIGNAL_THRESHOLD})"
+            else: # short
+                # 持有空头，但出现了强烈的多头信号
+                if l3_data['long_p'] > SIGNAL_THRESHOLD:
+                    should_close = True
+                    reason = f"信号反转 (Long Prob {l3_data['long_p']:.2f} > {SIGNAL_THRESHOLD})"
+            
+            if should_close:
+                logger.warning(f"🚨 触发主动平仓: {symbol} | 原因: {reason}")
+                try:
+                    self.trading_client.close_position(symbol)
+                    logger.info(f"✅ 已执行退出 (Exit) {symbol}")
+                except Exception as e:
+                    logger.error(f"❌ 退出失败 (Exit Failed) {symbol}: {e}")
+            
+            # --- 2. 移动止损 (简化版：保本损) ---
+            # 如果浮盈超过 1%，且当前没有挂保本损，则撤销原止损单，挂一个新的 SL 在成本价上方
+
     def execute_trade(self, symbol, side, direction, l2_ranked, price):
         """执行交易，返回 True 表示成功执行，False 表示跳过"""
         # 1. 检查持仓数限制
@@ -108,10 +167,10 @@ class TradingBot:
                 logger.warning(f"⚠️ 已达到最大持仓数 ({self.MAX_POSITIONS})，跳过 {symbol}")
                 return False
 
-        # 2. 检查是否已有该标的持仓
+        # 2. 检查是否已有该标的持仓 (若有，则说明方向一致，继续持有)
         for p in positions:
             if p.symbol == symbol:
-                logger.info(f"ℹ️ {symbol} 已有持仓，忽略信号。")
+                logger.info(f"ℹ️ {symbol} 已有持仓，保持现状 (Hold)。")
                 return False
         
         # 3. 检查是否有该标的的挂单
@@ -137,18 +196,19 @@ class TradingBot:
             return False
 
         # 6. 设置止盈止损价格 (从 SMC 规则获取)
+        risk = self.engine.get_risk_params(symbol, direction, l2_ranked)
+        if not risk:
+            logger.warning(f"⚠️ 无法计算 {symbol} 的风控参数 (可能数据不足)，跳过")
+            return False
+
         tp_price = risk['take_profit']
         sl_price = risk['stop_loss']
-        
-        logger.info(f"🎯 {symbol} | 入场: ${price:.2f} | 止盈: ${tp_price:.2f} ({risk['tp_pct']:.2%}) | 止损: ${sl_price:.2f} ({risk['sl_pct']:.2%})")
-            sl_price = round(price * (1 + sl_pct), 2)
-        else: # short
-            tp_price = round(price * (1 - tp_pct), 2)
-            sl_price = round(price * (1 - sl_pct), 2)
+        tp_pct = risk['tp_pct']
+        sl_pct = risk['sl_pct']
 
         logger.info(f"🚀 触发 {direction.upper()} 信号: {symbol} | 现价: ${price:.2f} | 股数: {qty}")
-        logger.info(f"   目标止盈: ${tp_price} ({tp_pct:+.2%})")
-        logger.info(f"   目标止损: ${sl_price} ({sl_pct:+.2%})")
+        logger.info(f"   目标止盈: ${tp_price:.2f} ({tp_pct:+.2%})")
+        logger.info(f"   目标止损: ${sl_price:.2f} ({sl_pct:+.2%})")
 
         try:
             # 构造 Bracket Order (支架订单: 包含自动止盈止损)
