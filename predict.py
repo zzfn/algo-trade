@@ -104,15 +104,16 @@ def run_hierarchical_prediction():
         logger.info(f"\n🚀 [做多建议] Top {len(long_signals)} 高置信度标的:")
         logger.info("-" * 60)
         for i, (_, signal) in enumerate(long_signals.iterrows(), 1):
+            predicted_return = engine.predict_return(signal['symbol'], all_ranked)
+            allocation = engine.get_allocation(signal['symbol'], all_ranked)
             risk = engine.get_risk_params(signal['symbol'], "long", all_ranked)
             if risk:
-                tp_pct = risk['tp_pct']
-                sl_pct = risk['sl_pct']
                 curr_price = signal['close']
-                denom = abs(sl_pct) if abs(sl_pct) > 1e-6 else 1e-6
-                rr_ratio = abs(tp_pct/denom)
-                logger.info(f"   [{i}] {signal['symbol']}: 置信度 {signal['long_p']:.1%} | 入场 ${curr_price:.2f}")
-                logger.info(f"       止盈 ${curr_price * (1 + tp_pct):.2f} ({tp_pct:+.2%}) | 止损 ${curr_price * (1 + sl_pct):.2f} ({sl_pct:+.2%}) | 盈亏比 {rr_ratio:.2f}:1")
+                tp_price = risk['take_profit']
+                sl_price = risk['stop_loss']
+                rr_ratio = risk['risk_reward']
+                logger.info(f"   [{i}] {signal['symbol']}: 置信度 {signal['long_p']:.1%} | 预期收益 {predicted_return:+.2%} | 仓位 {allocation:.0%}")
+                logger.info(f"       止盈 ${tp_price:.2f} ({risk['tp_pct']:+.2%}) | 止损 ${sl_price:.2f} ({risk['sl_pct']:+.2%}) | 盈亏比 {rr_ratio:.2f}:1")
     elif not results.get('l1_safe'):
         logger.warning("\n⚠️ 市场环境不安全，跳过做多建议")
     else:
@@ -123,15 +124,17 @@ def run_hierarchical_prediction():
         logger.info(f"\n📉 [做空建议] Top {len(short_signals)} 高置信度标的:")
         logger.info("-" * 60)
         for i, (_, signal) in enumerate(short_signals.iterrows(), 1):
+            predicted_return = engine.predict_return(signal['symbol'], all_ranked)
+            # 做空仓位我们暂时可以使用同样的收益率映射，或者之后根据需要调整
+            allocation = engine.get_allocation(signal['symbol'], all_ranked)
             risk = engine.get_risk_params(signal['symbol'], "short", all_ranked)
             if risk:
-                tp_pct = risk['tp_pct']
-                sl_pct = risk['sl_pct']
                 curr_price = signal['close']
-                denom = abs(sl_pct) if abs(sl_pct) > 1e-6 else 1e-6
-                rr_ratio = abs(tp_pct/denom)
-                logger.info(f"   [{i}] {signal['symbol']}: 置信度 {signal['short_p']:.1%} | 入场 ${curr_price:.2f}")
-                logger.info(f"       止盈 ${curr_price * (1 - tp_pct):.2f} (预期下跌 {tp_pct:.2%}) | 止损 ${curr_price * (1 - sl_pct):.2f} (预期上涨 {-sl_pct:.2%}) | 盈亏比 {rr_ratio:.2f}:1")
+                tp_price = risk['take_profit']
+                sl_price = risk['stop_loss']
+                rr_ratio = risk['risk_reward']
+                logger.info(f"   [{i}] {signal['symbol']}: 置信度 {signal['short_p']:.1%} | 预期跌幅 {predicted_return:.2%} | 仓位 {allocation:.0%}")
+                logger.info(f"       止盈 ${tp_price:.2f} ({risk['tp_pct']:+.2%}) | 止损 ${sl_price:.2f} ({risk['sl_pct']:+.2%}) | 盈亏比 {rr_ratio:.2f}:1")
     else:
         logger.info("\n💡 无高置信度做空信号")
 

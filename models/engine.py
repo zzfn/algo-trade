@@ -6,8 +6,9 @@ from data.provider import DataProvider
 from features.macro import L1FeatureBuilder
 from features.technical import FeatureBuilder
 from models.trainer import SklearnClassifierTrainer, RankingModelTrainer, SignalClassifierTrainer, RiskModelTrainer
+from models.smc_rules import get_smc_risk_params
 from models.constants import (
-    get_feature_columns, 
+    get_feature_columns, get_allocation_by_return,
     L1_SAFE_THRESHOLD, SIGNAL_THRESHOLD,
     L1_LOOKBACK_DAYS, L2_LOOKBACK_DAYS, L3_LOOKBACK_DAYS,
     L1_SYMBOLS, L2_SYMBOLS, TOP_N_TRADES
@@ -25,13 +26,9 @@ class StrategyEngine:
         self.l2_model = RankingModelTrainer().load("models/artifacts/l2_stock_selection.joblib")
         self.l3_model = SignalClassifierTrainer().load("models/artifacts/l3_execution.joblib")
         
+        # L4: 收益预测模型 (新版)
         self.l4_trainer = RiskModelTrainer()
-        self.l4_models = {
-            "tp_long": self.l4_trainer.load("models/artifacts/l4_risk_tp_long.joblib", "tp_long"),
-            "sl_long": self.l4_trainer.load("models/artifacts/l4_risk_sl_long.joblib", "sl_long"),
-            "tp_short": self.l4_trainer.load("models/artifacts/l4_risk_tp_short.joblib", "tp_short"),
-            "sl_short": self.l4_trainer.load("models/artifacts/l4_risk_sl_short.joblib", "sl_short")
-        }
+        self.l4_return_model = self.l4_trainer.load("models/artifacts/l4_return_predictor.joblib", "return_predictor")
         
         # 使用配置文件中的标的池
         self.l2_symbols = L2_SYMBOLS
@@ -98,24 +95,58 @@ class StrategyEngine:
 
         return results
 
+    def predict_return(self, symbol: str, l2_ranked: pd.DataFrame) -> float:
+        """
+        预测指定标的的未来收益率 (L4)。
+        
+        Args:
+            symbol: 标的代码
+            l2_ranked: L2 排序后的 DataFrame (包含特征)
+            
+        Returns:
+            预期收益率 (如 0.02 表示 2%)
+        """
+        feat_row = l2_ranked[l2_ranked['symbol'] == symbol]
+        if feat_row.empty:
+            return 0.0
+        
+        l2_features = get_feature_columns(feat_row)
+        predicted_return = self.l4_return_model.predict(feat_row[l2_features])[0]
+        return predicted_return
+
+    def get_allocation(self, symbol: str, l2_ranked: pd.DataFrame) -> float:
+        """
+        根据预期收益计算仓位分配比例。
+        
+        Args:
+            symbol: 标的代码
+            l2_ranked: L2 排序后的 DataFrame
+            
+        Returns:
+            仓位分配比例 (如 0.10 表示 10%)
+        """
+        predicted_return = self.predict_return(symbol, l2_ranked)
+        return get_allocation_by_return(predicted_return)
+
     def get_risk_params(self, symbol: str, direction: str, l2_ranked: pd.DataFrame):
         """
-        Calculate SL/TP for a specific symbol and direction.
+        使用 SMC 规则引擎计算止盈止损。
+        
+        Args:
+            symbol: 标的代码
+            direction: 'long' 或 'short'
+            l2_ranked: L2 排序后的 DataFrame
+            
+        Returns:
+            dict: 包含 entry, stop_loss, take_profit, sl_pct, tp_pct 的字典
         """
         feat_row = l2_ranked[l2_ranked['symbol'] == symbol]
         if feat_row.empty:
             return None
         
-        l2_features = get_feature_columns(feat_row)
-        
-        if direction == "long":
-            tp_pct = self.l4_models['tp_long'].predict(feat_row[l2_features])[0]
-            sl_pct = self.l4_models['sl_long'].predict(feat_row[l2_features])[0]
-        else:
-            tp_pct = self.l4_models['tp_short'].predict(feat_row[l2_features])[0]
-            sl_pct = self.l4_models['sl_short'].predict(feat_row[l2_features])[0]
-            
-        return {"tp_pct": tp_pct, "sl_pct": sl_pct}
+        # 使用 SMC 规则引擎计算止盈止损
+        row = feat_row.iloc[0]
+        return get_smc_risk_params(row, direction)
 
     def filter_signals(self, l3_signals, direction="long", top_n=None):
         """
@@ -140,3 +171,4 @@ class StrategyEngine:
         filtered = sorted_signals[sorted_signals[prob_col] > SIGNAL_THRESHOLD]
         
         return filtered
+

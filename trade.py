@@ -9,7 +9,7 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest, TakeProfitRequest, StopLossRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus, OrderClass
 from models.engine import StrategyEngine
-from models.constants import MAX_POSITIONS, TOP_N_TRADES, ALLOCATION_PER_TRADE
+from models.constants import MAX_POSITIONS, TOP_N_TRADES
 from utils.logger import setup_logger
 
 # 初始化日志
@@ -28,7 +28,6 @@ class TradingBot:
         # 使用统一配置常量
         self.MAX_POSITIONS = MAX_POSITIONS
         self.TOP_N_TRADES = TOP_N_TRADES
-        self.ALLOCATION_PER_TRADE = ALLOCATION_PER_TRADE
         
     def get_account_info(self):
         return self.trading_client.get_account()
@@ -122,27 +121,26 @@ class TradingBot:
                 logger.info(f"⏳ {symbol} 已有挂单 (ID: {order.id})，等待成交。")
                 return False
 
-        # 4. 获取 L4 风控参数
-        risk = self.engine.get_risk_params(symbol, direction, l2_ranked)
-        if not risk:
-            return False
-
-        tp_pct = risk['tp_pct']
-        sl_pct = risk['sl_pct']
+        # 5. 计算下单股数 (Position Sizing) - 动态仓位分配
+        predicted_return = self.engine.predict_return(symbol, l2_ranked)
+        allocation = self.engine.get_allocation(symbol, l2_ranked)
         
-        # 5. 计算下单股数 (Position Sizing)
         account = self.get_account_info()
         equity = float(account.equity)
-        target_value = equity * self.ALLOCATION_PER_TRADE
+        target_value = equity * allocation
         qty = int(target_value / price)
+        
+        logger.info(f"💰 {symbol} 预期收益: {predicted_return:.2%}, 分配比例: {allocation:.1%}, 目标股数: {qty}")
         
         if qty <= 0:
             logger.warning(f"⚠️ 资金不足以买入 1 股 {symbol} (需要约 ${price:.2f}, 分配额度 ${target_value:.2f})")
             return False
 
-        # 计算具体位
-        if direction == "long":
-            tp_price = round(price * (1 + tp_pct), 2)
+        # 6. 设置止盈止损价格 (从 SMC 规则获取)
+        tp_price = risk['take_profit']
+        sl_price = risk['stop_loss']
+        
+        logger.info(f"🎯 {symbol} | 入场: ${price:.2f} | 止盈: ${tp_price:.2f} ({risk['tp_pct']:.2%}) | 止损: ${sl_price:.2f} ({risk['sl_pct']:.2%})")
             sl_price = round(price * (1 + sl_pct), 2)
         else: # short
             tp_price = round(price * (1 - tp_pct), 2)

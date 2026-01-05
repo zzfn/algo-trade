@@ -202,6 +202,21 @@ class FeatureBuilder:
         df['target_rank'] = df.groupby('timestamp')['target_return'].rank(method='first', ascending=True) - 1
         return df
 
+    def add_return_target(self, df: pd.DataFrame, horizon: int = 5) -> pd.DataFrame:
+        """
+        计算未来收益率标签。
+        用于 L4 收益预测模型。
+        
+        Args:
+            df: 带有 OHLCV 的 DataFrame
+            horizon: 预测的未来周期数
+            
+        Returns:
+            添加了 target_future_return 列的 DataFrame
+        """
+        df['target_future_return'] = df.groupby('symbol')['close'].shift(-horizon) / df['close'] - 1
+        return df
+
     def add_shakeout_features(self, df: pd.DataFrame, lookback: int = 20) -> pd.DataFrame:
         """
         检测洗盘 (Shakeout/Stop-Hunt) 信号。

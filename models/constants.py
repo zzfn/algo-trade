@@ -20,7 +20,20 @@ L3_LOOKBACK_DAYS = 10        # L3 执行信号回溯天数
 # --- 交易参数 ---
 TOP_N_TRADES = 3             # 每轮选择 top_n 个高置信度标的进行交易
 MAX_POSITIONS = 5            # 最大持仓数限制
-ALLOCATION_PER_TRADE = 0.10  # 每笔交易分配的资金比例 (10%)
+
+# --- 动态仓位分配 (基于预期收益) ---
+ALLOCATION_TIERS = [
+    (0.05, 0.15),   # 预期收益 > 5% → 分配 15%
+    (0.02, 0.10),   # 预期收益 > 2% → 分配 10%
+    (0.01, 0.05),   # 预期收益 > 1% → 分配 5%
+    (0.00, 0.02),   # 预期收益 > 0% → 分配 2%
+]
+MIN_ALLOCATION = 0.02        # 最小仓位
+MAX_ALLOCATION = 0.15        # 最大仓位
+
+# --- SMC 风控参数 ---
+RISK_REWARD_RATIO = 2.0      # 默认盈亏比
+STOP_LOSS_BUFFER = 0.005     # 止损位距离 Swing High/Low 的缓冲 (0.5%)
 
 # --- 标的池 ---
 L1_SYMBOLS = ['SPY', 'VIXY', 'TLT']  # L1 市场择时标的
@@ -39,7 +52,8 @@ FEATURE_EXCLUDE_COLS = [
     'atr', 'vwap', 'trade_count', 'local_high', 'local_low',
     # 目标标签 (需要预测的输出)
     'target_return', 'target_rank', 'target_signal', 'max_future_return',
-    # L4 风控目标
+    'target_future_return',  # L4 收益预测目标
+    # L4 旧版风控目标 (已废弃)
     'target_tp_long_pct', 'target_sl_long_pct',
     'target_tp_short_pct', 'target_sl_short_pct',
     # 预测输出
@@ -58,3 +72,20 @@ def get_feature_columns(df):
         list: 特征列名列表
     """
     return [c for c in df.columns if c not in FEATURE_EXCLUDE_COLS]
+
+
+def get_allocation_by_return(predicted_return: float) -> float:
+    """
+    根据预期收益计算仓位分配比例。
+    
+    Args:
+        predicted_return: 预期收益率 (如 0.02 表示 2%)
+        
+    Returns:
+        float: 仓位分配比例
+    """
+    for threshold, allocation in ALLOCATION_TIERS:
+        if predicted_return > threshold:
+            return allocation
+    return MIN_ALLOCATION
+
