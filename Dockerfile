@@ -1,5 +1,5 @@
 # 使用 python:3.11-slim 作为基础镜像
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 # 设置时区为中国标准时间
 ENV TZ=Asia/Shanghai
@@ -9,8 +9,7 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 
 # 复制 uv 二进制文件
-COPY --from=ghcr.io/astral-sh/uv:0.8.9 /uv /uvx /bin/
-
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 # 可选：配置清华大学镜像源（加速 apt-get，国内用户推荐）
 RUN echo "deb http://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main" > /etc/apt/sources.list \
     && echo "deb http://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main" >> /etc/apt/sources.list \
