@@ -8,6 +8,10 @@ help:
 	@echo "  make train-l3      - 训练 L3 执行模型 (Signal)"
 	@echo "  make train-l4      - 训练 L4 风控模型 (Risk Management)"
 	@echo "  make predict       - 运行四层架构层级预测 (Real-time)"
+	@echo "  make backtest-l1   - 回测 L1 (Macro / Market Timing)"
+	@echo "  make backtest-l2   - 回测 L2 (Stock Selection)"
+	@echo "  make backtest-l3   - 回测 L3 (Signal Execution)"
+	@echo "  make backtest-l4   - 回测 L4 (Risk & Allocation)"
 	@echo "  make backtest tf=1h - 运行多空策略回测"
 	@echo "  make trade         - 运行全自动交易"
 	@echo "  make setup         - 安装依赖"
@@ -35,6 +39,20 @@ trade:
 	PYTHONPATH=. uv run python trade.py $(args)
 
 # 回测命令 (保留通用回测脚本支持)
+# 分层回测命令
+backtest-l1:
+	PYTHONPATH=. uv run python scripts/backtest_l1.py --days $(if $(days),$(days),365)
+
+backtest-l2:
+	PYTHONPATH=. uv run python scripts/backtest_l2.py --days $(if $(days),$(days),90)
+
+backtest-l3:
+	PYTHONPATH=. uv run python scripts/backtest_l3.py --symbol $(if $(symbol),$(symbol),NVDA) --days $(if $(days),$(days),30)
+
+backtest-l4:
+	PYTHONPATH=. uv run python scripts/backtest_l4.py --days $(if $(days),$(days),60)
+
+# 整体回测命令
 backtest:
 	PYTHONPATH=. uv run python scripts/backtest.py $(if $(tf),$(tf),1h) --days $(if $(days),$(days),90) --top_n 1
 
