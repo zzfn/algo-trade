@@ -6,7 +6,7 @@ ENV TZ=Asia/Shanghai
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # 设置 uv 镜像源
-ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 
 # 复制 uv 二进制文件
 COPY --from=ghcr.io/astral-sh/uv:0.8.9 /uv /uvx /bin/
