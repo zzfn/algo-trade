@@ -9,7 +9,7 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest, TakeProfitRequest, StopLossRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus, OrderClass, QueryOrderStatus
 from models.engine import StrategyEngine
-from models.constants import MAX_POSITIONS, TOP_N_TRADES
+from models.constants import TOP_N_TRADES
 from utils.logger import setup_logger
 from models.constants import SIGNAL_THRESHOLD
 
@@ -27,7 +27,7 @@ class TradingBot:
         self.engine = StrategyEngine()
         self.ny_tz = pytz.timezone("America/New_York")
         # 使用统一配置常量
-        self.MAX_POSITIONS = MAX_POSITIONS
+
         self.TOP_N_TRADES = TOP_N_TRADES
         
     def get_account_info(self):
@@ -51,7 +51,7 @@ class TradingBot:
         logger.info(f"Equity: ${float(account.equity):.2f} | Buying Power: ${float(account.buying_power):.2f}")
         
         positions = self.get_positions()
-        logger.info(f"📦 Current Positions ({len(positions)}/{self.MAX_POSITIONS}):")
+        logger.info(f"📦 Current Positions ({len(positions)}):")
         if not positions:
             logger.info("   (No active positions)")
         for p in positions:
@@ -72,6 +72,10 @@ class TradingBot:
         if l3_signals.empty:
             logger.error("❌ No signal data available.")
             return
+            
+        l3_ts = results.get('l3_timestamp')
+        if l3_ts:
+            logger.info(f"📡 API Data Time: {l3_ts.strftime('%Y-%m-%d %H:%M:%S')} ET")
 
         # 3. 趋势确认执行逻辑 (Top N 分散交易)
         # 使用 engine.filter_signals 统一过滤高置信度标的
@@ -168,13 +172,8 @@ class TradingBot:
 
     def execute_trade(self, symbol, side, direction, l2_ranked, price):
         """执行交易，返回 True 表示成功执行，False 表示跳过"""
-        # 1. 检查持仓数限制 (Disabled)
-        # positions = self.get_positions()
-        # if len(positions) >= self.MAX_POSITIONS:
-        #     # 只有当该标的已有持仓时才允许（用于可能的调仓或止损，但目前 logic 是跳过）
-        #     if not any(p.symbol == symbol for p in positions):
-        #         logger.warning(f"⚠️ 已达到最大持仓数 ({self.MAX_POSITIONS})，跳过 {symbol}")
-        #         return False
+        positions = self.get_positions()
+
 
         # 2. 检查是否已有该标的持仓 (若有，则说明方向一致，继续持有)
         for p in positions:
