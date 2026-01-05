@@ -1,4 +1,4 @@
-.PHONY: train-l1 train-l2 train-l3 backtest predict help setup clean
+.PHONY: train-l1 train-l2 train-l3 train-l4 backtest predict trade help setup clean
 
 # 默认目标
 help:
@@ -9,6 +9,7 @@ help:
 	@echo "  make train-l4      - 训练 L4 风控模型 (Risk Management)"
 	@echo "  make predict       - 运行四层架构层级预测 (Real-time)"
 	@echo "  make backtest tf=1h - 运行多空策略回测"
+	@echo "  make trade         - 运行全自动交易"
 	@echo "  make setup         - 安装依赖"
 	@echo "  make clean         - 清理输出文件"
 

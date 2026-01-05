@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from data.provider import DataProvider
 from features.technical import FeatureBuilder
 from models.trainer import SignalClassifierTrainer
-from models.constants import get_feature_columns
+from models.constants import get_feature_columns, L2_SYMBOLS
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 
@@ -16,7 +16,8 @@ def train_l3_model():
     end_date = datetime.now()
     start_date = end_date - timedelta(days=180)
     
-    symbols = ['NVDA', 'MU', 'TSLA', 'AMD', 'AAPL', 'MSFT']
+    # 使用与 L2 相同的标的池，保持模型一致性
+    symbols = L2_SYMBOLS
     print(f"Fetching 15m data for {len(symbols)} stocks for L3 execution...")
     
     df_raw = provider.fetch_bars(symbols, TimeFrame(15, TimeFrameUnit.Minute), start_date, end_date)

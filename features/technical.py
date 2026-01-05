@@ -152,8 +152,11 @@ class FeatureBuilder:
         # 3. Fair Value Gaps (FVG) - 归一化大小
         df['fvg_up'] = ((df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])).astype(int)
         df['fvg_down'] = ((df['high'] < df['low'].shift(2)) & (df['close'] < df['open'])).astype(int)
-        df['fvg_size_rel'] = df.apply(lambda x: (x['low'] - df.loc[x.name-2, 'high']) if x['fvg_up'] else 
-                                     (df.loc[x.name-2, 'low'] - x['high']) if x['fvg_down'] else 0, axis=1) / atr
+        # 使用向量化操作替代 df.apply，避免因非连续索引导致的 KeyError
+        df['fvg_size_rel'] = np.where(
+            df['fvg_up'] == 1, df['low'] - df['high'].shift(2),
+            np.where(df['fvg_down'] == 1, df['low'].shift(2) - df['high'], 0)
+        ) / atr
         
         # 4. Displacement
         df['displacement'] = ( (df['high'] - df['low']) > atr * 1.5).astype(int)
@@ -264,8 +267,8 @@ class FeatureBuilder:
             
             return group
         
-        # 按 symbol 分组计算
-        df = df.groupby('symbol', group_keys=False).apply(calculate_risk_targets, include_groups=False)
+        # 按 symbol 分组计算 (不使用 include_groups=False 以保留 symbol 列)
+        df = df.groupby('symbol', group_keys=False).apply(calculate_risk_targets)
         
         return df
 
