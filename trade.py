@@ -11,6 +11,7 @@ from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus, OrderClass
 from models.engine import StrategyEngine
 from models.constants import MAX_POSITIONS, TOP_N_TRADES
 from utils.logger import setup_logger
+from models.constants import SIGNAL_THRESHOLD
 
 # 初始化日志
 logger = setup_logger("trade")
@@ -109,7 +110,7 @@ class TradingBot:
         """
         主动管理现有持仓：
         1. 信号反转 -> 立即平仓 (Exit)
-        2. (TODO) 移动止损
+        1. 信号反转 -> 立即平仓 (Exit)
         """
         positions = self.get_positions()
         if not positions:
@@ -117,7 +118,7 @@ class TradingBot:
 
         logger.info(f"🔄 正在检查 {len(positions)} 个持仓的动态管理...")
         
-        from models.constants import SIGNAL_THRESHOLD
+
 
         for p in positions:
             symbol = p.symbol
@@ -150,23 +151,30 @@ class TradingBot:
             if should_close:
                 logger.warning(f"🚨 触发主动平仓: {symbol} | 原因: {reason}")
                 try:
+                    # 1. 先取消该标的的所有挂单 (释放 held_for_orders)
+                    all_orders = self.get_open_orders()
+                    for o in all_orders:
+                        if o.symbol == symbol:
+                            self.trading_client.cancel_order_by_id(o.id)
+                            logger.info(f"   - 已撤单: {o.id}")
+                    
+                    # 2. 执行平仓
                     self.trading_client.close_position(symbol)
                     logger.info(f"✅ 已执行退出 (Exit) {symbol}")
                 except Exception as e:
                     logger.error(f"❌ 退出失败 (Exit Failed) {symbol}: {e}")
             
-            # --- 2. 移动止损 (简化版：保本损) ---
-            # 如果浮盈超过 1%，且当前没有挂保本损，则撤销原止损单，挂一个新的 SL 在成本价上方
+
 
     def execute_trade(self, symbol, side, direction, l2_ranked, price):
         """执行交易，返回 True 表示成功执行，False 表示跳过"""
-        # 1. 检查持仓数限制
-        positions = self.get_positions()
-        if len(positions) >= self.MAX_POSITIONS:
-            # 只有当该标的已有持仓时才允许（用于可能的调仓或止损，但目前 logic 是跳过）
-            if not any(p.symbol == symbol for p in positions):
-                logger.warning(f"⚠️ 已达到最大持仓数 ({self.MAX_POSITIONS})，跳过 {symbol}")
-                return False
+        # 1. 检查持仓数限制 (Disabled)
+        # positions = self.get_positions()
+        # if len(positions) >= self.MAX_POSITIONS:
+        #     # 只有当该标的已有持仓时才允许（用于可能的调仓或止损，但目前 logic 是跳过）
+        #     if not any(p.symbol == symbol for p in positions):
+        #         logger.warning(f"⚠️ 已达到最大持仓数 ({self.MAX_POSITIONS})，跳过 {symbol}")
+        #         return False
 
         # 2. 检查是否已有该标的持仓 (若有，则说明方向一致，继续持有)
         for p in positions:
@@ -208,19 +216,16 @@ class TradingBot:
         sl_pct = risk['sl_pct']
 
         logger.info(f"🚀 触发 {direction.upper()} 信号: {symbol} | 现价: ${price:.2f} | 股数: {qty}")
-        logger.info(f"   目标止盈: ${tp_price:.2f} ({tp_pct:+.2%})")
-        logger.info(f"   目标止损: ${sl_price:.2f} ({sl_pct:+.2%})")
+        logger.info(f"   [Ref Only] 建议止盈: ${tp_price:.2f} ({tp_pct:+.2%})")
+        logger.info(f"   [Ref Only] 建议止损: ${sl_price:.2f} ({sl_pct:+.2%})")
 
         try:
-            # 构造 Bracket Order (支架订单: 包含自动止盈止损)
+            # 构造 Market Order (仅市价单，不带止盈止损，依靠实时轮询平仓)
             order_data = MarketOrderRequest(
                 symbol=symbol,
                 qty=qty, 
                 side=side,
-                time_in_force=TimeInForce.GTC,
-                order_class=OrderClass.BRACKET,
-                take_profit=TakeProfitRequest(limit_price=tp_price),
-                stop_loss=StopLossRequest(stop_price=sl_price)
+                time_in_force=TimeInForce.GTC
             )
             order = self.trading_client.submit_order(order_data)
             logger.info(f"✅ 订单已提交! ID: {order.id}")
@@ -231,7 +236,7 @@ class TradingBot:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--interval", type=int, default=15, help="检查间隔（分钟）")
+    parser.add_argument("--interval", type=int, default=1, help="检查间隔（分钟）")
     parser.add_argument("--log-file", type=str, default=None, help="日志文件路径")
     args = parser.parse_args()
 

@@ -12,23 +12,23 @@ def train_l3_model():
     provider = DataProvider()
     builder = FeatureBuilder()
     
-    # 1. 获取 6 个月的 15 分钟线数据
-    # 截止日期固定为 2024-12-31，2025 年数据用于样本外验证
+    # 1. 获取 60 天的 1 分钟线数据 (约2.3万根K线)
+    # 截止日期固定为 2024-12-31
     end_date = datetime(2024, 12, 31)
-    start_date = end_date - timedelta(days=180)
+    start_date = end_date - timedelta(days=60)
     
     # 使用与 L2 相同的标的池，保持模型一致性
     symbols = L2_SYMBOLS
-    print(f"Fetching 15m data for {len(symbols)} stocks for L3 trend confirmation...")
+    print(f"Fetching 1m data for {len(symbols)} stocks for L3 trend confirmation...")
     
-    df_raw = provider.fetch_bars(symbols, TimeFrame(15, TimeFrameUnit.Minute), start_date, end_date)
+    df_raw = provider.fetch_bars(symbols, TimeFrame.Minute, start_date, end_date)
     print(f"Raw data rows: {len(df_raw)}")
     
     # 2. 构建特征和分类标签 (短线博弈)
     print("Building features and L3 targets...")
     df = builder.add_all_features(df_raw, is_training=False) # 先跑特征
-    # L3 目标：未来 4 根 K 线 (1小时) 是否有 0.3% 的收益
-    df = builder.add_classification_target(df, horizon=4, threshold=0.003)
+    # L3 目标：未来 15 根 K 线 (15分钟) 是否有 0.3% 的收益
+    df = builder.add_classification_target(df, horizon=15, threshold=0.003)
     df = df.dropna()
     
     # 3. 准备特征列

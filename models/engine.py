@@ -77,21 +77,21 @@ class StrategyEngine:
         # --- L3: Trend Confirmation ---
         all_l2_symbols = l2_latest['symbol'].tolist()
         l3_start = target_dt - timedelta(days=L3_LOOKBACK_DAYS)
-        df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame(15, TimeFrameUnit.Minute), l3_start, target_dt + timedelta(days=1))
+        df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame.Minute, l3_start, target_dt + timedelta(days=1))
         df_l3_feats = self.l2_builder.add_all_features(df_l3_raw, is_training=False)
         l3_valid = df_l3_feats[df_l3_feats['timestamp'] <= target_dt]
         
         if l3_valid.empty:
             results['l3_signals'] = pd.DataFrame()
         else:
-            last_15m_ts = l3_valid['timestamp'].max()
-            l3_latest = l3_valid[l3_valid['timestamp'] == last_15m_ts].copy()
+            last_ts = l3_valid['timestamp'].max()
+            l3_latest = l3_valid[l3_valid['timestamp'] == last_ts].copy()
             l3_features = get_feature_columns(l3_latest)
             probs = self.l3_model.predict_proba(l3_latest[l3_features])
             l3_latest['long_p'] = probs[:, 1]
             l3_latest['short_p'] = probs[:, 2]
             results['l3_signals'] = l3_latest
-            results['l3_timestamp'] = last_15m_ts
+            results['l3_timestamp'] = last_ts
 
         return results
 
