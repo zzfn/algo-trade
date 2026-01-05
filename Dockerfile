@@ -20,11 +20,11 @@ WORKDIR /app
 
 # 复制依赖文件并安装依赖
 COPY pyproject.toml uv.lock ./
-RUN uv sync --no-install-project
+RUN uv sync --locked --no-install-project
 
 # 复制项目代码并安装项目
 COPY . .
-RUN uv sync
+RUN uv sync --locked
 
 # 设置默认命令
 CMD ["uv", "run", "trade.py", "--interval", "1"]
