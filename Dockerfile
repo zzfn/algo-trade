@@ -9,9 +9,9 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 COPY --from=ghcr.io/astral-sh/uv:0.8.9 /uv /uvx /bin/
 
 # 可选：配置清华大学镜像源（加速 apt-get，国内用户推荐）
-RUN echo "deb http://mirrors.tuna.tsinghua.edu.cn/debian/ trixie main" > /etc/apt/sources.list \
-    && echo "deb http://mirrors.tuna.tsinghua.edu.cn/debian/ trixie-updates main" >> /etc/apt/sources.list \
-    && echo "deb http://mirrors.tuna.tsinghua.edu.cn/debian-security/ trixie-security main" >> /etc/apt/sources.list
+RUN echo "deb http://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm main" > /etc/apt/sources.list \
+    && echo "deb http://mirrors.tuna.tsinghua.edu.cn/debian/ bookworm-updates main" >> /etc/apt/sources.list \
+    && echo "deb http://mirrors.tuna.tsinghua.edu.cn/debian-security/ bookworm-security main" >> /etc/apt/sources.list
 
 # 设置工作目录
 WORKDIR /app
@@ -25,4 +25,4 @@ COPY . .
 RUN uv sync --locked
 
 # 设置默认命令
-CMD ["uv", "run", "src/main.py"]
+CMD ["uv", "run", "trade.py"]
