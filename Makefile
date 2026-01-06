@@ -80,3 +80,10 @@ optimize-l3:
 
 optimize-all:
 	make optimize-l2 && make optimize-l3
+
+# VectorBT 回测
+backtest-vbt:
+	PYTHONPATH=. uv run python scripts/backtest_vbt.py --days $(if $(days),$(days),30)
+
+backtest-vbt-full:
+	PYTHONPATH=. uv run python scripts/backtest_vbt.py --days 90 --cash 100000
