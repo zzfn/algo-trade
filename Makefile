@@ -2,21 +2,47 @@
 
 # 默认目标
 help:
-	@echo "可用命令:"
-	@echo "  make train-l1      - 训练 L1 择时模型 (Macro)"
-	@echo "  make train-l2      - 训练 L2 选股模型 (Ranker)"
-	@echo "  make train-l3      - 训练 L3 趋势模型 (Trend)"
-	@echo "  make train-l4      - 训练 L4 风控模型 (Risk Management)"
-	@echo "  make inspect-models- 分析各层模型特征重要性"
-	@echo "  make predict       - 运行四层架构层级预测 (Real-time)"
-	@echo "  make backtest-l1   - 回测 L1 (Macro / Market Timing)"
-	@echo "  make backtest-l2   - 回测 L2 (Stock Selection)"
-	@echo "  make backtest-l3   - 回测 L3 (Trend Confirmation)"
-	@echo "  make backtest-l4   - 回测 L4 (Risk & Allocation)"
-	@echo "  make backtest tf=1h - 运行多空策略回测"
-	@echo "  make trade         - 运行全自动交易"
-	@echo "  make setup         - 安装依赖"
-	@echo "  make clean         - 清理输出文件"
+	@echo "============================================================"
+	@echo "🚀 算法交易系统 - 可用命令"
+	@echo "============================================================"
+	@echo ""
+	@echo "📊 模型训练:"
+	@echo "  make train-l1          - 训练 L1 市场择时模型"
+	@echo "  make train-l2          - 训练 L2 选股排序模型"
+	@echo "  make train-l3          - 训练 L3 趋势确认模型"
+	@echo "  make train-l4          - 训练 L4 收益预测模型"
+	@echo "  make train-l5          - 训练 L5 元策略模型 ⭐"
+	@echo ""
+	@echo "🔧 超参数优化 (Optuna):"
+	@echo "  make optimize-l2       - 优化 L2 模型参数"
+	@echo "  make optimize-l3       - 优化 L3 模型参数"
+	@echo "  make optimize-all      - 优化所有模型参数"
+	@echo ""
+	@echo "📈 回测:"
+	@echo "  make backtest          - 运行传统回测"
+	@echo "  make backtest-vbt      - VectorBT 回测 (30天) ⭐"
+	@echo "  make backtest-vbt-full - VectorBT 完整回测 (90天)"
+	@echo "  make backtest-l1       - L1 单层回测"
+	@echo "  make backtest-l2       - L2 单层回测"
+	@echo "  make backtest-l3       - L3 单层回测"
+	@echo "  make backtest-l4       - L4 单层回测"
+	@echo ""
+	@echo "🤖 实时交易:"
+	@echo "  make predict           - 运行实时预测"
+	@echo "  make trade             - 启动自动交易"
+	@echo ""
+	@echo "🧠 L5 元策略:"
+	@echo "  make generate-meta-data - 生成 L5 训练数据 (30-60分钟)"
+	@echo "  make train-l5           - 训练 L5 元策略模型"
+	@echo ""
+	@echo "🛠️  其他:"
+	@echo "  make inspect-models    - 分析模型特征重要性"
+	@echo "  make setup             - 安装依赖"
+	@echo "  make clean             - 清理输出文件"
+	@echo ""
+	@echo "============================================================"
+	@echo "💡 提示: 使用 'make <命令> --help' 查看详细参数"
+	@echo "============================================================"
 
 # 训练命令
 train-l1:
@@ -87,3 +113,10 @@ backtest-vbt:
 
 backtest-vbt-full:
 	PYTHONPATH=. uv run python scripts/backtest_vbt.py --days 90 --cash 100000
+
+# L5 元策略
+generate-meta-data:
+	PYTHONPATH=. uv run python scripts/generate_meta_data.py --days 180
+
+train-l5:
+	PYTHONPATH=. uv run python scripts/train_l5.py

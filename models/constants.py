@@ -10,16 +10,24 @@
 
 # --- 信号阈值 ---
 L1_SAFE_THRESHOLD = 0.5      # L1 市场安全阈值 (概率 > 此值为安全)
-SIGNAL_THRESHOLD = 0.45      # L3 趋势置信度阈值 (做多/做空概率 > 此值触发)
+
+# --- 动态参数 (自动从 L5 加载) ---
+try:
+    from models.dynamic_params import get_dynamic_params
+    _params = get_dynamic_params()
+    SIGNAL_THRESHOLD = _params['signal_threshold']  # L5 动态优化 ⭐
+    TOP_N_TRADES = _params['top_n_trades']          # L5 动态优化 ⭐
+    L1_RISK_FACTOR = _params['l1_risk_factor']      # L5 动态优化 ⭐
+except:
+    # 回退到默认值
+    SIGNAL_THRESHOLD = 0.517
+    TOP_N_TRADES = 2
+    L1_RISK_FACTOR = 0.633
 
 # --- 时间窗口 (天数) ---
 L1_LOOKBACK_DAYS = 300       # L1 市场择时回溯天数
 L2_LOOKBACK_DAYS = 60        # L2 标的筛选回溯天数
 L3_LOOKBACK_DAYS = 10        # L3 趋势确认 (Trend) 回溯天数
-
-# --- 交易参数 ---
-TOP_N_TRADES = 3             # 每轮选择 top_n 个高置信度标的进行交易
-L1_RISK_FACTOR = 0.5         # L1 市场不安全时的仓位缩减系数 (0.5 = 降低到 50%)
 
 # --- 动态仓位分配 (基于预期收益) ---
 # 调整：降低门槛以适应短线预测的低绝对收益值

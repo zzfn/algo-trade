@@ -171,7 +171,7 @@ class StrategyEngine:
         row = feat_row.iloc[0]
         return get_smc_risk_params(row, direction)
 
-    def filter_signals(self, l3_signals, direction="long", top_n=None):
+    def filter_signals(self, l3_signals, direction="long", top_n=None, threshold=None):
         """
         过滤和排序信号，返回达到阈值的 top_n 个高置信度标的。
         
@@ -179,6 +179,7 @@ class StrategyEngine:
             l3_signals: L3 趋势信号 DataFrame (包含 long_p, short_p 等列)
             direction: 'long' 或 'short'
             top_n: 返回的标的数量，默认使用 TOP_N_TRADES
+            threshold: 信号置信度阈值，默认使用 SIGNAL_THRESHOLD
             
         Returns:
             DataFrame: 过滤后的高置信度信号
@@ -186,12 +187,15 @@ class StrategyEngine:
         if top_n is None:
             top_n = TOP_N_TRADES
             
+        if threshold is None:
+            threshold = SIGNAL_THRESHOLD
+            
         prob_col = 'long_p' if direction == 'long' else 'short_p'
         
         # 排序并取 top_n
         sorted_signals = l3_signals.sort_values(prob_col, ascending=False).head(top_n)
         # 过滤达到阈值的信号
-        filtered = sorted_signals[sorted_signals[prob_col] > SIGNAL_THRESHOLD]
+        filtered = sorted_signals[sorted_signals[prob_col] > threshold]
         
         return filtered
 

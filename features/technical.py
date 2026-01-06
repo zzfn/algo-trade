@@ -184,17 +184,36 @@ class FeatureBuilder:
         Advanced Smart Money Concepts features.
         """
         atr = df['atr'] + 1e-9
-        # 1. Swing Highs and Lows (Fractals)
+        # 1. Swing Highs and Lows (Fractals) - 修复数据泄露
+        # 只有在 t+window 时刻才能确认 t 时刻是高点/低点
+        # 所以我们需要向后 shift(window) 来模拟实盘中的滞后确认
         window = 3
-        df['swing_high'] = (df['high'] == df['high'].rolling(window=window*2+1, center=True).max()).astype(int)
-        df['swing_low'] = (df['low'] == df['low'].rolling(window=window*2+1, center=True).min()).astype(int)
+        
+        # 原始逻辑(泄露): t时刻知道 t+3 的数据
+        # is_high = df['high'] == df['high'].rolling(window=window*2+1, center=True).max()
+        
+        # 修复逻辑: 
+        # t-3 时刻的高点,需要在 t 时刻才能确认
+        # 所以我们计算 rolling max,然后判断中间那个点是否是最大值
+        
+        # 使用 rolling window 计算过去 2*window+1 根K线
+        rolling_max = df['high'].rolling(window=window*2+1).max()
+        rolling_min = df['low'].rolling(window=window*2+1).min()
+        
+        # 判断 window 根K线之前的那个点是否是局部极值
+        # 注意: 这里确实会有 window 根K线的延迟,这是正常的
+        df['swing_high'] = (df['high'].shift(window) == rolling_max).astype(int)
+        df['swing_low'] = (df['low'].shift(window) == rolling_min).astype(int)
         
         # 2. Market Structure (BOS / CHoCH)
+        # 使用 shift(1) 避免直接使用当前 bar 的 swing点 (虽然已经滞后了,但为了安全)
         last_h = df['high'].where(df['swing_high'] == 1).ffill()
         last_l = df['low'].where(df['swing_low'] == 1).ffill()
         
-        df['bos_up'] = ((df['close'] > last_h.shift(1)) & (df['high'] != last_h)).astype(int)
-        df['bos_down'] = ((df['close'] < last_l.shift(1)) & (df['low'] != last_l)).astype(int)
+        # BOS: 收盘价突破前高/前低
+        # 注意: 这里比较的是当前的 close 和 之前确认的 high
+        df['bos_up'] = ((df['close'] > last_h.shift(1)) & (df['close'].shift(1) <= last_h.shift(1))).astype(int)
+        df['bos_down'] = ((df['close'] < last_l.shift(1)) & (df['close'].shift(1) >= last_l.shift(1))).astype(int)
         
         # 3. Fair Value Gaps (FVG) - 归一化大小
         df['fvg_up'] = ((df['low'] > df['high'].shift(2)) & (df['close'] > df['open'])).astype(int)

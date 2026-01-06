@@ -8,8 +8,11 @@ from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest, TakeProfitRequest, StopLossRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus, OrderClass, QueryOrderStatus
+import numpy as np
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from models.engine import StrategyEngine
 from models.constants import TOP_N_TRADES, SIGNAL_THRESHOLD, L1_RISK_FACTOR
+from models.dynamic_params import get_dynamic_params
 from utils.logger import setup_logger
 
 # 初始化日志
@@ -82,7 +85,57 @@ class TradingBot:
             pnl_pct = float(p.unrealized_plpc) * 100
             logger.info(f"   - {p.symbol}: {p.qty} shares | PnL: ${pnl:+.2f} ({pnl_pct:+.2f}%)")
         
-        # 3. 运行预测模型
+        # 3. 获取实时市场特征并预测 L5 参数
+        try:
+            # 获取最近 30 天的 SPY 数据
+            spy_start = target_dt - timedelta(days=45)
+            spy_data = self.engine.provider.fetch_bars(['SPY'], TimeFrame.Day, spy_start, target_dt)
+            
+            if not spy_data.empty:
+                # 计算市场特征
+                spy_returns = spy_data['close'].pct_change()
+                spy_return_1d = spy_returns.iloc[-1]
+                spy_volatility = spy_returns.std() * np.sqrt(252)
+                recent_vol = spy_returns.tail(20).std()
+                
+                # 简单趋势判断
+                sma_20 = spy_data['close'].rolling(20).mean().iloc[-1]
+                sma_50 = spy_data['close'].rolling(50).mean().iloc[-1]
+                trend = 1 if sma_20 > sma_50 else -1
+                
+                market_features = {
+                    'spy_return_1d': spy_return_1d,
+                    'spy_volatility': spy_volatility,
+                    'vixy_level': 16.0,  # 默认值 (如果无法获取实时 VIXY)
+                    'market_trend': trend,
+                    'recent_volatility': recent_vol
+                }
+                
+                # 预测动态参数
+                dynamic_params = get_dynamic_params(market_features)
+                
+                # 更新参数
+                current_threshold = dynamic_params['signal_threshold']
+                current_top_n = dynamic_params['top_n_trades']
+                current_risk_factor = dynamic_params['l1_risk_factor']
+                
+                logger.info(f"🧠 L5 动态参数预测:")
+                logger.info(f"   Threshold: {current_threshold:.3f} (Base: {SIGNAL_THRESHOLD})")
+                logger.info(f"   Top N:     {current_top_n} (Base: {TOP_N_TRADES})")
+                logger.info(f"   Risk Fx:   {current_risk_factor:.3f} (Base: {L1_RISK_FACTOR})")
+            else:
+                logger.warning("⚠️ 无法获取 SPY 数据,使用默认参数")
+                current_threshold = SIGNAL_THRESHOLD
+                current_top_n = TOP_N_TRADES
+                current_risk_factor = L1_RISK_FACTOR
+                
+        except Exception as e:
+            logger.warning(f"⚠️ L5 预测失败: {e},使用默认参数")
+            current_threshold = SIGNAL_THRESHOLD
+            current_top_n = TOP_N_TRADES
+            current_risk_factor = L1_RISK_FACTOR
+
+        # 4. 运行预测模型
         results = self.engine.analyze(target_dt)
         if results.get('l2_ranked') is None or results['l2_ranked'].empty:
             logger.error("❌ No strategy data available.")
@@ -100,10 +153,10 @@ class TradingBot:
         if l3_ts:
             logger.info(f"📡 API Data Time: {l3_ts.strftime('%Y-%m-%d %H:%M:%S')} ET")
 
-        # 4. 趋势确认执行逻辑 (Top N 分散交易)
-        # 使用 engine.filter_signals 统一过滤高置信度标的
-        long_signals = self.engine.filter_signals(l3_signals, direction="long", top_n=self.TOP_N_TRADES)
-        short_signals = self.engine.filter_signals(l3_signals, direction="short", top_n=self.TOP_N_TRADES)
+        # 5. 趋势确认执行逻辑 (Top N 分散交易)
+        # 使用 engine.filter_signals 统一过滤高置信度标的 - 传入动态参数
+        long_signals = self.engine.filter_signals(l3_signals, direction="long", top_n=current_top_n, threshold=current_threshold)
+        short_signals = self.engine.filter_signals(l3_signals, direction="short", top_n=current_top_n, threshold=current_threshold)
 
         # 5. 持仓管理 (动态止盈止损 / 信号平仓)
         self.manage_positions(l3_signals, all_ranked)
@@ -114,7 +167,7 @@ class TradingBot:
         if l1_safe:
             logger.info(f"✅ L1 Market Safety: SAFE (概率: {l1_prob:.2%}) - 使用正常仓位")
         else:
-            logger.warning(f"⚠️ L1 Market Safety: UNSAFE (概率: {l1_prob:.2%}) - 降低仓位至 {L1_RISK_FACTOR:.0%}")
+            logger.warning(f"⚠️ L1 Market Safety: UNSAFE (概率: {l1_prob:.2%}) - 降低仓位至 {current_risk_factor:.1%}")
 
         # 多头信号
         executed_longs = 0
