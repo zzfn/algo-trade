@@ -3,6 +3,9 @@ import joblib
 import pandas as pd
 import numpy as np
 from typing import List, Tuple
+import optuna
+import json
+from pathlib import Path
 
 class RankingModelTrainer:
     def __init__(self, model_name: str = "Mag7_Ranker"):
@@ -76,6 +79,55 @@ class RankingModelTrainer:
         if self.model:
             return self.model.predict(X)
         return np.array([])
+    
+    def optimize(self, df: pd.DataFrame, feature_cols: List[str], target_col: str, n_trials: int = 50) -> dict:
+        """使用 Optuna 优化超参数"""
+        print(f"\n🔍 开始 Optuna 超参数优化 (L2 Ranker)... 试验次数: {n_trials}")
+        
+        study = optuna.create_study(direction='maximize')
+        study.optimize(
+            lambda trial: self._objective(trial, df, feature_cols, target_col),
+            n_trials=n_trials,
+            show_progress_bar=True
+        )
+        
+        print(f"\n✅ 优化完成! 最佳 NDCG@3: {study.best_value:.4f}")
+        print(f"   最佳参数: {study.best_params}")
+        return study.best_params
+    
+    def _objective(self, trial: optuna.Trial, df: pd.DataFrame, feature_cols: List[str], target_col: str) -> float:
+        """Optuna 目标函数"""
+        df = df.sort_values('timestamp')
+        groups = df.groupby('timestamp').size().tolist()
+        X, y = df[feature_cols], df[target_col]
+        
+        split_idx = int(len(groups) * 0.8)
+        train_size = sum(groups[:split_idx])
+        X_train, X_test = X.iloc[:train_size], X.iloc[train_size:]
+        y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
+        
+        params = {
+            'objective': 'lambdarank', 'metric': 'ndcg',
+            'num_leaves': trial.suggest_int('num_leaves', 20, 100),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
+            'n_estimators': trial.suggest_int('n_estimators', 50, 300),
+            'max_depth': trial.suggest_int('max_depth', 3, 12),
+            'min_child_samples': trial.suggest_int('min_child_samples', 5, 50),
+            'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-8, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True),
+            'label_gain': np.arange(max(y) + 1).tolist(),
+            'random_state': 42, 'verbosity': -1
+        }
+        
+        model = lgb.LGBMRanker(**params)
+        model.fit(X_train, y_train, group=groups[:split_idx],
+                 eval_set=[(X_test, y_test)], eval_group=[groups[split_idx:]],
+                 eval_at=[3], callbacks=[lgb.early_stopping(20, verbose=False)])
+        
+        return model.best_score_['valid_0']['ndcg@3']
+
 
 class SignalClassifierTrainer:
     def __init__(self, model_name: str = "Universal_Signal_Classifier"):
@@ -135,6 +187,52 @@ class SignalClassifierTrainer:
         if self.model:
             return self.model.predict_proba(X)
         return np.array([])
+    
+    def optimize(self, df: pd.DataFrame, feature_cols: List[str], target_col: str, n_trials: int = 50) -> dict:
+        """使用 Optuna 优化超参数"""
+        print(f"\n🔍 开始 Optuna 超参数优化 (L3 Classifier)... 试验次数: {n_trials}")
+        
+        study = optuna.create_study(direction='maximize')
+        study.optimize(
+            lambda trial: self._objective(trial, df, feature_cols, target_col),
+            n_trials=n_trials,
+            show_progress_bar=True
+        )
+        
+        print(f"\n✅ 优化完成! 最佳 F1-Score: {study.best_value:.4f}")
+        print(f"   最佳参数: {study.best_params}")
+        return study.best_params
+    
+    def _objective(self, trial: optuna.Trial, df: pd.DataFrame, feature_cols: List[str], target_col: str) -> float:
+        """Optuna 目标函数"""
+        X, y = df[feature_cols], df[target_col]
+        split_idx = int(len(df) * 0.8)
+        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+        
+        params = {
+            'objective': 'multiclass', 'num_class': 3, 'metric': 'multi_logloss',
+            'num_leaves': trial.suggest_int('num_leaves', 20, 80),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2, log=True),
+            'n_estimators': trial.suggest_int('n_estimators', 100, 400),
+            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'min_child_samples': trial.suggest_int('min_child_samples', 5, 50),
+            'subsample': trial.suggest_float('subsample', 0.6, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-8, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-8, 10.0, log=True),
+            'random_state': 42, 'verbosity': -1
+        }
+        
+        model = lgb.LGBMClassifier(**params)
+        model.fit(X_train, y_train, eval_set=[(X_test, y_test)],
+                 callbacks=[lgb.early_stopping(20, verbose=False)])
+        
+        # 返回 F1-Score (宏平均)
+        from sklearn.metrics import f1_score
+        y_pred = model.predict(X_test)
+        return f1_score(y_test, y_pred, average='macro')
+
 
 class SklearnClassifierTrainer:
     def __init__(self, model_type: str = "rf"):

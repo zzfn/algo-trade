@@ -70,3 +70,13 @@ clean:
 	rm -rf __pycache__
 	rm -rf */__pycache__
 	rm -rf scripts/legacy/__pycache__
+
+# Optuna 超参数优化
+optimize-l2:
+	PYTHONPATH=. uv run python scripts/optimize_l2.py
+
+optimize-l3:
+	PYTHONPATH=. uv run python scripts/optimize_l3.py
+
+optimize-all:
+	make optimize-l2 && make optimize-l3
