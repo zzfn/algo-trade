@@ -61,11 +61,35 @@ make setup
 ### 训练模型
 
 ```bash
-# 训练所有模型
-make train-l1  # 市场择时模型
-make train-l2  # 选股排序模型
-make train-l3  # 趋势确认模型
-make train-l4  # 风控管理模型
+# 1. 训练基础模型
+make train-l1  # 市场择时
+make train-l2  # 选股排序
+make train-l3  # 趋势确认
+make train-l4  # 风控管理
+
+# 2. 训练元策略 (L5)
+make generate-meta-data  # 生成数据
+make train-l5           # 训练 L5
+```
+
+### 🔧 超参数优化 (Optuna)
+
+```bash
+make optimize-l2  # 优化 L2 (自动保存最佳参数)
+make optimize-l3  # 优化 L3
+```
+
+### 📈 回测策略
+
+```bash
+# 🚀 VectorBT 高速回测 (推荐)
+make backtest-vbt days=30
+
+# 经典回测 (显示交易明细)
+make backtest tf=1h days=90 --details
+
+# 自定义标的池
+make backtest --symbols AAPL,TSLA,NVDA
 ```
 
 ### 运行预测

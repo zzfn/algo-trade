@@ -16,5 +16,7 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "ta-lib>=0.6.8",
     "vectorbt>=0.28.2",
+    "pyarrow>=14.0.0",
+    "redis>=5.0.0",
 ]
 
