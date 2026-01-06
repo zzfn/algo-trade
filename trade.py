@@ -9,9 +9,8 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest, TakeProfitRequest, StopLossRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus, OrderClass, QueryOrderStatus
 from models.engine import StrategyEngine
-from models.constants import TOP_N_TRADES
+from models.constants import TOP_N_TRADES, SIGNAL_THRESHOLD, L1_RISK_FACTOR
 from utils.logger import setup_logger
-from models.constants import SIGNAL_THRESHOLD
 
 # 初始化日志
 logger = setup_logger("trade")
@@ -41,12 +40,36 @@ class TradingBot:
         return self.trading_client.get_orders(req)
 
     def run_iteration(self):
+        """
+        执行一轮交易检查
+        
+        Returns:
+            datetime or None: 如果市场关闭,返回下次开盘时间;否则返回 None
+        """
         target_dt = datetime.now(self.ny_tz).replace(tzinfo=None)
         logger.info("\n" + "="*50)
         logger.info(f"📊 Iteration: {target_dt.strftime('%Y-%m-%d %H:%M:%S')} ET")
         logger.info("="*50)
         
-        # 1. 检查账户与持仓
+        # 1. 检查市场是否开放
+        try:
+            clock = self.trading_client.get_clock()
+            if not clock.is_open:
+                next_open = clock.next_open.astimezone(self.ny_tz)
+                next_close = clock.next_close.astimezone(self.ny_tz) if clock.next_close else None
+                logger.info(f"⏸️  市场当前关闭")
+                logger.info(f"   下次开盘: {next_open.strftime('%Y-%m-%d %H:%M:%S')} ET")
+                if next_close:
+                    logger.info(f"   下次收盘: {next_close.strftime('%Y-%m-%d %H:%M:%S')} ET")
+                logger.info("   跳过本轮交易检查")
+                return next_open.replace(tzinfo=None)  # 返回下次开盘时间
+            else:
+                logger.info(f"✅ 市场开放中 (收盘时间: {clock.next_close.astimezone(self.ny_tz).strftime('%H:%M:%S')} ET)")
+        except Exception as e:
+            logger.warning(f"⚠️  无法获取市场状态: {e}")
+            logger.warning("   继续执行(假设市场开放)...")
+        
+        # 2. 检查账户与持仓
         account = self.get_account_info()
         logger.info(f"Equity: ${float(account.equity):.2f} | Buying Power: ${float(account.buying_power):.2f}")
         
@@ -59,7 +82,7 @@ class TradingBot:
             pnl_pct = float(p.unrealized_plpc) * 100
             logger.info(f"   - {p.symbol}: {p.qty} shares | PnL: ${pnl:+.2f} ({pnl_pct:+.2f}%)")
         
-        # 2. 运行预测模型
+        # 3. 运行预测模型
         results = self.engine.analyze(target_dt)
         if results.get('l2_ranked') is None or results['l2_ranked'].empty:
             logger.error("❌ No strategy data available.")
@@ -77,85 +100,122 @@ class TradingBot:
         if l3_ts:
             logger.info(f"📡 API Data Time: {l3_ts.strftime('%Y-%m-%d %H:%M:%S')} ET")
 
-        # 3. 趋势确认执行逻辑 (Top N 分散交易)
+        # 4. 趋势确认执行逻辑 (Top N 分散交易)
         # 使用 engine.filter_signals 统一过滤高置信度标的
         long_signals = self.engine.filter_signals(l3_signals, direction="long", top_n=self.TOP_N_TRADES)
         short_signals = self.engine.filter_signals(l3_signals, direction="short", top_n=self.TOP_N_TRADES)
 
-        # 4. 持仓管理 (动态止盈止损 / 信号平仓)
-        self.manage_positions(l3_signals)
+        # 5. 持仓管理 (动态止盈止损 / 信号平仓)
+        self.manage_positions(l3_signals, all_ranked)
 
-        # 5. 信号执行 (Signal Execution)
-        # 根据最新信号与当前持仓状态，决定是保持、开仓还是反手 (反手需在 manage_positions 平仓后下一轮触发)
-        
-        # 多头信号 (遍历过滤后的标的)
-        # [Debug] 跳过 L1 限制，强制执行多头
-        if not l1_safe:
-            logger.warning("⚠️ L1 Market Safety: UNSAFE (Ignoring check)")
+        # 6. 信号执行 (Signal Execution)
+        # L1 作为风险因子: 不安全时降低仓位而非禁止交易
+        l1_prob = results.get('l1_prob', 0.0)
+        if l1_safe:
+            logger.info(f"✅ L1 Market Safety: SAFE (概率: {l1_prob:.2%}) - 使用正常仓位")
+        else:
+            logger.warning(f"⚠️ L1 Market Safety: UNSAFE (概率: {l1_prob:.2%}) - 降低仓位至 {L1_RISK_FACTOR:.0%}")
 
+        # 多头信号
         executed_longs = 0
         for _, signal in long_signals.iterrows():
-            success = self.execute_trade(signal['symbol'], OrderSide.BUY, "long", all_ranked, price=signal['close'])
+            success = self.execute_trade(signal['symbol'], OrderSide.BUY, "long", all_ranked, price=signal['close'], l1_safe=l1_safe)
             if success:
                 executed_longs += 1
         if executed_longs > 0:
             logger.info(f"📊 本轮多头交易: 成功执行 {executed_longs} 笔")
 
-        # 空头信号 (遍历过滤后的标的)
+        # 空头信号
         executed_shorts = 0
         for _, signal in short_signals.iterrows():
-            success = self.execute_trade(signal['symbol'], OrderSide.SELL, "short", all_ranked, price=signal['close'])
+            success = self.execute_trade(signal['symbol'], OrderSide.SELL, "short", all_ranked, price=signal['close'], l1_safe=l1_safe)
             if success:
                 executed_shorts += 1
         if executed_shorts > 0:
             logger.info(f"📊 本轮空头交易: 成功执行 {executed_shorts} 笔")
 
-    def manage_positions(self, l3_signals):
+    def manage_positions(self, l3_signals, l2_ranked):
         """
-        主动管理现有持仓：
-        1. 信号反转 -> 立即平仓 (Exit)
-        1. 信号反转 -> 立即平仓 (Exit)
+        主动管理现有持仓:
+        1. 基于价格的止盈止损检查 (优先)
+        2. 信号反转检查
+        
+        Args:
+            l3_signals: L3 趋势信号 DataFrame
+            l2_ranked: L2 排序后的 DataFrame (用于获取特征和计算风控参数)
         """
         positions = self.get_positions()
         if not positions:
             return
 
         logger.info(f"🔄 正在检查 {len(positions)} 个持仓的动态管理...")
-        
-
 
         for p in positions:
             symbol = p.symbol
             qty = abs(int(p.qty))
-            side = OrderSide.SELL if p.side == 'long' else OrderSide.BUY # 平仓方向
+            side = OrderSide.SELL if p.side == 'long' else OrderSide.BUY  # 平仓方向
             entry_price = float(p.avg_entry_price)
             current_price = float(p.current_price)
             
-            # --- 1. 信号反转检查 ---
-            # 查找该标的的最新 L3 信号
-            l3_row = l3_signals[l3_signals['symbol'] == symbol]
-            if l3_row.empty:
-                continue
-            
-            l3_data = l3_row.iloc[0]
             should_close = False
             reason = ""
-
-            if p.side == 'long':
-                # 持有多头，但出现了强烈的空头信号
-                if l3_data['short_p'] > SIGNAL_THRESHOLD:
-                    should_close = True
-                    reason = f"信号反转 (Short Prob {l3_data['short_p']:.2f} > {SIGNAL_THRESHOLD})"
-            else: # short
-                # 持有空头，但出现了强烈的多头信号
-                if l3_data['long_p'] > SIGNAL_THRESHOLD:
-                    should_close = True
-                    reason = f"信号反转 (Long Prob {l3_data['long_p']:.2f} > {SIGNAL_THRESHOLD})"
             
+            # --- 1. 基于价格的止盈止损检查 (优先) ---
+            # 从 l2_ranked 获取该标的的特征数据
+            feat_row = l2_ranked[l2_ranked['symbol'] == symbol]
+            
+            if not feat_row.empty:
+                # 计算该持仓的止盈止损价格
+                direction = 'long' if p.side == 'long' else 'short'
+                risk_params = self.engine.get_risk_params(symbol, direction, l2_ranked)
+                
+                if risk_params:
+                    tp_price = risk_params['take_profit']
+                    sl_price = risk_params['stop_loss']
+                    
+                    if p.side == 'long':
+                        # 做多: 价格跌破止损或突破止盈
+                        if current_price <= sl_price:
+                            should_close = True
+                            pnl_pct = (current_price / entry_price - 1) * 100
+                            reason = f"触发止损 (当前价 ${current_price:.2f} <= 止损价 ${sl_price:.2f}, {pnl_pct:+.2f}%)"
+                        elif current_price >= tp_price:
+                            should_close = True
+                            pnl_pct = (current_price / entry_price - 1) * 100
+                            reason = f"触发止盈 (当前价 ${current_price:.2f} >= 止盈价 ${tp_price:.2f}, {pnl_pct:+.2f}%)"
+                    else:  # short
+                        # 做空: 价格突破止损或跌破止盈
+                        if current_price >= sl_price:
+                            should_close = True
+                            pnl_pct = (1 - current_price / entry_price) * 100
+                            reason = f"触发止损 (当前价 ${current_price:.2f} >= 止损价 ${sl_price:.2f}, {pnl_pct:+.2f}%)"
+                        elif current_price <= tp_price:
+                            should_close = True
+                            pnl_pct = (1 - current_price / entry_price) * 100
+                            reason = f"触发止盈 (当前价 ${current_price:.2f} <= 止盈价 ${tp_price:.2f}, {pnl_pct:+.2f}%)"
+            
+            # --- 2. 信号反转检查 (只有在未触发止盈止损时才检查) ---
+            if not should_close:
+                l3_row = l3_signals[l3_signals['symbol'] == symbol]
+                if not l3_row.empty:
+                    l3_data = l3_row.iloc[0]
+                    
+                    if p.side == 'long':
+                        # 持有多头,但出现了强烈的空头信号
+                        if l3_data['short_p'] > SIGNAL_THRESHOLD:
+                            should_close = True
+                            reason = f"信号反转 (Short Prob {l3_data['short_p']:.2%} > {SIGNAL_THRESHOLD:.2%})"
+                    else:  # short
+                        # 持有空头,但出现了强烈的多头信号
+                        if l3_data['long_p'] > SIGNAL_THRESHOLD:
+                            should_close = True
+                            reason = f"信号反转 (Long Prob {l3_data['long_p']:.2%} > {SIGNAL_THRESHOLD:.2%})"
+            
+            # --- 3. 执行平仓 ---
             if should_close:
                 logger.warning(f"🚨 触发主动平仓: {symbol} | 原因: {reason}")
                 try:
-                    # 1. 先取消该标的的所有挂单 (释放 held_for_orders)
+                    # 1. 先取消该标的的所有挂单
                     all_orders = self.get_open_orders()
                     for o in all_orders:
                         if o.symbol == symbol:
@@ -164,14 +224,22 @@ class TradingBot:
                     
                     # 2. 执行平仓
                     self.trading_client.close_position(symbol)
-                    logger.info(f"✅ 已执行退出 (Exit) {symbol}")
+                    logger.info(f"✅ 已执行平仓: {symbol}")
                 except Exception as e:
-                    logger.error(f"❌ 退出失败 (Exit Failed) {symbol}: {e}")
-            
+                    logger.error(f"❌ 平仓失败 {symbol}: {e}")
 
-
-    def execute_trade(self, symbol, side, direction, l2_ranked, price):
-        """执行交易，返回 True 表示成功执行，False 表示跳过"""
+    def execute_trade(self, symbol, side, direction, l2_ranked, price, l1_safe=True):
+        """
+        执行交易，返回 True 表示成功执行，False 表示跳过
+        
+        Args:
+            symbol: 标的代码
+            side: 交易方向 (BUY/SELL)
+            direction: 'long' 或 'short'
+            l2_ranked: L2 排序数据
+            price: 当前价格
+            l1_safe: L1 市场安全标志 (用于调整仓位)
+        """
         positions = self.get_positions()
 
 
@@ -188,9 +256,9 @@ class TradingBot:
                 logger.info(f"⏳ {symbol} 已有挂单 (ID: {order.id})，等待成交。")
                 return False
 
-        # 5. 计算下单股数 (Position Sizing) - 动态仓位分配
+        # 5. 计算下单股数 (Position Sizing) - 动态仓位分配 (考虑 L1 风险)
         predicted_return = self.engine.predict_return(symbol, l2_ranked)
-        allocation = self.engine.get_allocation(symbol, l2_ranked)
+        allocation = self.engine.get_allocation(symbol, l2_ranked, l1_safe=l1_safe)
         
         account = self.get_account_info()
         equity = float(account.equity)
@@ -235,7 +303,7 @@ class TradingBot:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--interval", type=int, default=1, help="检查间隔（分钟）")
+    parser.add_argument("--interval", type=int, default=1, help="检查间隔(分钟),默认1分钟")
     parser.add_argument("--log-file", type=str, default=None, help="日志文件路径")
     args = parser.parse_args()
 
@@ -246,13 +314,54 @@ def main():
     bot = TradingBot()
     logger.info(f"✨ 交易机器人启动 | 状态: 实盘自动交易 (模拟盘) | 间隔: {args.interval}min")
     
+    iteration_count = 0
+    
     while True:
         try:
-            bot.run_iteration()
+            iteration_count += 1
+            
+            # 执行一轮检查
+            next_open = bot.run_iteration()
+            
+            # 如果市场关闭,智能等待到开盘前5分钟
+            if next_open:
+                now = datetime.now(bot.ny_tz).replace(tzinfo=None)
+                wait_until = next_open - timedelta(minutes=5)  # 提前5分钟唤醒
+                wait_seconds = (wait_until - now).total_seconds()
+                
+                if wait_seconds > 60:  # 如果等待时间超过1分钟
+                    logger.info(f"💤 市场关闭,将在 {wait_until.strftime('%Y-%m-%d %H:%M:%S')} ET 唤醒 (开盘前5分钟)")
+                    logger.info(f"   等待时长: {wait_seconds/3600:.1f} 小时")
+                    time.sleep(max(wait_seconds, 0))
+                    continue
+            
+        except KeyboardInterrupt:
+            logger.info("\n⏹️  用户中断,正在安全退出...")
+            logger.info("📊 最终持仓状态:")
+            try:
+                positions = bot.get_positions()
+                if positions:
+                    for p in positions:
+                        pnl = float(p.unrealized_pl)
+                        logger.info(f"   - {p.symbol}: {p.qty} shares | PnL: ${pnl:+.2f}")
+                else:
+                    logger.info("   (无持仓)")
+            except:
+                pass
+            break
+            
+        except ConnectionError as e:
+            logger.error(f"🌐 网络连接错误: {e}")
+            logger.info("⏳ 等待 60 秒后重试...")
+            time.sleep(60)
+            continue
+            
         except Exception as e:
-            logger.error(f"Error in iteration: {e}")
+            logger.error(f"❌ 运行错误: {e}", exc_info=True)
+            logger.info("⏳ 等待下一轮检查...")
         
-        logger.info(f"Waiting for {args.interval} minutes...")
+        # 正常等待间隔
+        logger.info(f"\n💤 等待 {args.interval} 分钟...\n")
         time.sleep(args.interval * 60)
 
 if __name__ == "__main__":

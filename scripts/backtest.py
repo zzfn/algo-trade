@@ -14,7 +14,7 @@ from models.engine import StrategyEngine
 from models.constants import (
     get_feature_columns, 
     L1_SAFE_THRESHOLD, SIGNAL_THRESHOLD, 
-    MAX_POSITIONS, TOP_N_TRADES
+    TOP_N_TRADES
 )
 from utils.logger import setup_logger
 
@@ -206,8 +206,8 @@ class BacktestEngine:
         # 3. 市场环境判断 (L1) - SIMPLIFIED: 始终假设安全
         is_safe = True
 
-        # 4. 信号生成与开仓 (仅当现金充足且未满仓)
-        if len(self.positions) < MAX_POSITIONS:
+        # 4. 信号生成与开仓 (仅当现金充足)
+        if self.cash > 0:
             # 收集所有标的的 L2 rank 和 L3 signal
             candidates = []
             for sym, bar in current_bars.items():
@@ -227,8 +227,6 @@ class BacktestEngine:
             top_picks = candidates[:self.top_n]
             
             for pick in top_picks:
-                if len(self.positions) >= MAX_POSITIONS:
-                    break
                 if self.cash <= 0:
                     break
                     

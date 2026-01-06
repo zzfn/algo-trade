@@ -9,7 +9,7 @@ from models.trainer import SklearnClassifierTrainer, RankingModelTrainer, Signal
 from models.smc_rules import get_smc_risk_params
 from models.constants import (
     get_feature_columns, get_allocation_by_return,
-    L1_SAFE_THRESHOLD, SIGNAL_THRESHOLD,
+    L1_SAFE_THRESHOLD, SIGNAL_THRESHOLD, L1_RISK_FACTOR,
     L1_LOOKBACK_DAYS, L2_LOOKBACK_DAYS, L3_LOOKBACK_DAYS,
     L1_SYMBOLS, L2_SYMBOLS, TOP_N_TRADES
 )
@@ -61,6 +61,7 @@ class StrategyEngine:
         l2_start = target_dt - timedelta(days=L2_LOOKBACK_DAYS)
         df_l2_raw = self.provider.fetch_bars(self.l2_symbols, TimeFrame(15, TimeFrameUnit.Minute), l2_start, target_dt + timedelta(days=1))
         df_l2_feats = self.l2_builder.add_all_features(df_l2_raw, is_training=False)
+        
         l2_valid = df_l2_feats[df_l2_feats['timestamp'] <= target_dt]
         
         if l2_valid.empty:
@@ -69,8 +70,14 @@ class StrategyEngine:
             
         last_h_ts = l2_valid['timestamp'].max()
         l2_latest = l2_valid[l2_valid['timestamp'] == last_h_ts].copy()
+        
+        # L2 模型预测 (不使用 L1 特征)
         l2_features = get_feature_columns(l2_latest)
         l2_latest['rank_score'] = self.l2_model.predict(l2_latest[l2_features])
+        
+        # 预测后合并 L1 特征 (供 L4 使用)
+        l2_latest = self.l2_builder.merge_l1_features(l2_latest, df_l1_feats)
+        
         results['l2_ranked'] = l2_latest.sort_values('rank_score', ascending=False)
         results['l2_timestamp'] = last_h_ts
 
@@ -79,6 +86,7 @@ class StrategyEngine:
         l3_start = target_dt - timedelta(days=L3_LOOKBACK_DAYS)
         df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame.Minute, l3_start, target_dt + timedelta(days=1))
         df_l3_feats = self.l2_builder.add_all_features(df_l3_raw, is_training=False)
+        
         l3_valid = df_l3_feats[df_l3_feats['timestamp'] <= target_dt]
         
         if l3_valid.empty:
@@ -86,10 +94,16 @@ class StrategyEngine:
         else:
             last_ts = l3_valid['timestamp'].max()
             l3_latest = l3_valid[l3_valid['timestamp'] == last_ts].copy()
+            
+            # L3 模型预测 (不使用 L1 特征)
             l3_features = get_feature_columns(l3_latest)
             probs = self.l3_model.predict_proba(l3_latest[l3_features])
             l3_latest['long_p'] = probs[:, 1]
             l3_latest['short_p'] = probs[:, 2]
+            
+            # 预测后合并 L1 特征 (供 L4 使用)
+            l3_latest = self.l2_builder.merge_l1_features(l3_latest, df_l1_feats)
+            
             results['l3_signals'] = l3_latest
             results['l3_timestamp'] = last_ts
 
@@ -114,19 +128,28 @@ class StrategyEngine:
         predicted_return = self.l4_return_model.predict(feat_row[l2_features])[0]
         return predicted_return
 
-    def get_allocation(self, symbol: str, l2_ranked: pd.DataFrame) -> float:
+    def get_allocation(self, symbol: str, l2_ranked: pd.DataFrame, l1_safe: bool = True) -> float:
         """
-        根据预期收益计算仓位分配比例。
+        根据预期收益和市场环境计算仓位分配比例。
         
         Args:
             symbol: 标的代码
             l2_ranked: L2 排序后的 DataFrame
+            l1_safe: L1 市场安全标志 (用于调整仓位)
             
         Returns:
             仓位分配比例 (如 0.10 表示 10%)
         """
         predicted_return = self.predict_return(symbol, l2_ranked)
-        return get_allocation_by_return(predicted_return)
+        base_allocation = get_allocation_by_return(predicted_return)
+        
+        # L1 风险调整: 市场不安全时降低仓位
+        if not l1_safe:
+            # 使用配置的风险系数降低仓位
+            return base_allocation * L1_RISK_FACTOR
+        
+        return base_allocation
+
 
     def get_risk_params(self, symbol: str, direction: str, l2_ranked: pd.DataFrame):
         """

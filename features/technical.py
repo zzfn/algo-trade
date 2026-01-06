@@ -35,6 +35,53 @@ class FeatureBuilder:
             
         return df
 
+    def merge_l1_features(self, df: pd.DataFrame, l1_features: pd.DataFrame) -> pd.DataFrame:
+        """
+        将 L1 宏观特征合并到技术特征 DataFrame 中。
+        
+        Args:
+            df: 技术特征 DataFrame (包含 timestamp, symbol 等)
+            l1_features: L1 宏观特征 DataFrame (包含 timestamp 和宏观指标)
+            
+        Returns:
+            合并后的 DataFrame,每行都包含对应时间的 L1 特征
+        """
+        # 确保 timestamp 列是 datetime 类型
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        l1_features['timestamp'] = pd.to_datetime(l1_features['timestamp'])
+        
+        # 只提取 L1 宏观特征列 (排除 OHLCV 和目标列)
+        # L1 特征以 spy_, vixy_, tlt_ 开头
+        l1_cols = [c for c in l1_features.columns 
+                   if c.startswith(('spy_', 'vixy_', 'tlt_')) 
+                   and c not in ['target_spy_5d']]
+        
+        if not l1_cols:
+            print("  Warning: No L1 macro features found!")
+            return df
+        
+        # 使用 merge_asof 进行时间对齐 (向前填充最近的 L1 数据)
+        # 因为 L1 是日线,而 df 可能是分钟线或小时线
+        df = df.sort_values('timestamp')
+        l1_features = l1_features.sort_values('timestamp')
+        
+        # 对每个 symbol 分别合并 (虽然 L1 对所有 symbol 都一样)
+        merged_groups = []
+        for symbol, group in df.groupby('symbol'):
+            merged = pd.merge_asof(
+                group,
+                l1_features[['timestamp'] + l1_cols],
+                on='timestamp',
+                direction='backward'  # 使用最近的历史 L1 数据
+            )
+            merged_groups.append(merged)
+        
+        df = pd.concat(merged_groups).reset_index(drop=True)
+        
+        return df
+
+
+
     def _add_indicators_per_symbol(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         对单只标的计算所有指标

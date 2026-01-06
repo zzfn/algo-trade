@@ -9,57 +9,113 @@ from dotenv import load_dotenv
 
 def train_l4_model():
     """
-    训练 L4 收益预测模型。
+    训练 L4 收益预测模型 (包含 L1 宏观特征)。
     
-    新版 L4 预测未来 5 周期收益率，用于动态仓位分配。
-    止盈止损改为使用 SMC 规则引擎 (models/smc_rules.py)。
+    新版 L4 预测未来 5 周期收益率,用于动态仓位分配。
+    现在包含 L1 宏观特征,让模型自动学习市场环境对收益的影响。
     """
     load_dotenv()
     provider = DataProvider()
     builder = FeatureBuilder()
     
-    # 1. 获取 1 年的小时线数据
-    # 截止日期固定为 2024-12-31，2025 年数据用于样本外验证
-    # L4: 收益预测模型 (Return Prediction) -> 动态仓位; SMC 风控用于 TP/SL
-    end_date = datetime(2024, 12, 31)
-    start_date = end_date - timedelta(days=365)
+    # 1. 获取 L1 宏观数据 (日线)
+    print("=" * 60)
+    print("Step 1: Fetching L1 macro data...")
+    print("=" * 60)
     
-    # 使用统一的标的池
+    end_date = datetime(2024, 12, 31)
+    l1_start = end_date - timedelta(days=365 * 2)  # L1 需要更长历史
+    
+    from features.macro import L1FeatureBuilder
+    from models.constants import L1_SYMBOLS
+    
+    l1_builder = L1FeatureBuilder()
+    l1_dict = {}
+    for sym in L1_SYMBOLS:
+        df = provider.fetch_bars(sym, TimeFrame.Day, l1_start, end_date)
+        l1_dict[sym] = df
+        print(f"  Loaded {len(df)} days for {sym}")
+    
+    l1_features = l1_builder.build_l1_features(l1_dict)
+    print(f"  L1 features built: {len(l1_features)} rows")
+    print(f"  L1 columns: {[c for c in l1_features.columns if c != 'timestamp']}")
+    
+    # 2. 获取 L4 技术数据 (小时线)
+    print("\n" + "=" * 60)
+    print("Step 2: Fetching L4 technical data...")
+    print("=" * 60)
+    
+    start_date = end_date - timedelta(days=365)
     symbols = L2_SYMBOLS
-    print(f"Fetching data for {len(symbols)} stocks for L4 return prediction...")
+    print(f"  Fetching data for {len(symbols)} stocks...")
     
     df_raw = provider.fetch_bars(symbols, TimeFrame.Hour, start_date, end_date)
-    print(f"Raw data rows: {len(df_raw)}")
+    print(f"  Raw data rows: {len(df_raw)}")
     
-    # 2. 构建特征和收益标签
-    print("Building features and return targets...")
+    # 3. 构建技术特征
+    print("\n" + "=" * 60)
+    print("Step 3: Building technical features...")
+    print("=" * 60)
+    
     df = builder.add_all_features(df_raw, is_training=False)
-    df = builder.add_return_target(df, horizon=5)  # 预测未来 5 周期收益率
+    print(f"  Technical features added: {len(df)} rows")
+    
+    # 4. 合并 L1 宏观特征
+    print("\n" + "=" * 60)
+    print("Step 4: Merging L1 macro features...")
+    print("=" * 60)
+    
+    df = builder.merge_l1_features(df, l1_features)
+    print(f"  L1 features merged: {len(df)} rows")
+    
+    # 验证 L1 特征已添加
+    l1_cols = [c for c in df.columns if c.startswith('spy_') or c.startswith('vixy_') or c.startswith('tlt_')]
+    print(f"  L1 macro columns in dataset: {l1_cols}")
+    
+    # 5. 添加收益目标
+    print("\n" + "=" * 60)
+    print("Step 5: Adding return targets...")
+    print("=" * 60)
+    
+    df = builder.add_return_target(df, horizon=5)
     
     # 删除 NaN
     df = df.dropna()
-    print(f"Valid training samples: {len(df)}")
+    print(f"  Valid training samples: {len(df)}")
     
     # 打印收益分布
-    print(f"\nTarget return distribution:")
-    print(f"  Mean:   {df['target_future_return'].mean():.4%}")
-    print(f"  Std:    {df['target_future_return'].std():.4%}")
-    print(f"  Min:    {df['target_future_return'].min():.4%}")
-    print(f"  Max:    {df['target_future_return'].max():.4%}")
+    print(f"\n  Target return distribution:")
+    print(f"    Mean:   {df['target_future_return'].mean():.4%}")
+    print(f"    Std:    {df['target_future_return'].std():.4%}")
+    print(f"    Min:    {df['target_future_return'].min():.4%}")
+    print(f"    Max:    {df['target_future_return'].max():.4%}")
     
-    # 3. 准备特征列
+    # 6. 准备特征列 (包含 L1 特征)
+    print("\n" + "=" * 60)
+    print("Step 6: Preparing features for training...")
+    print("=" * 60)
+    
     feature_cols = get_feature_columns(df)
+    print(f"  Total features: {len(feature_cols)}")
+    print(f"  L1 macro features: {len([c for c in feature_cols if c in l1_cols])}")
+    print(f"  Technical features: {len(feature_cols) - len([c for c in feature_cols if c in l1_cols])}")
     
-    print(f"\nTraining L4 Return Prediction model with {len(feature_cols)} features.")
+    # 7. 训练模型
+    print("\n" + "=" * 60)
+    print("Step 7: Training L4 Return Prediction model...")
+    print("=" * 60)
     
-    # 4. 训练单个收益预测模型
     trainer = RiskModelTrainer()
     trainer.train(df, feature_cols, 'target_future_return', 'return_predictor')
     trainer.save("models/artifacts/l4_return_predictor.joblib")
     
-    print("\n✅ L4 Return Prediction model training complete.")
-    print("   Model saved to: models/artifacts/l4_return_predictor.joblib")
-    print("   Note: Stop-loss/Take-profit now uses SMC rules (models/smc_rules.py)")
+    print("\n" + "=" * 60)
+    print("✅ L4 Return Prediction model training complete!")
+    print("=" * 60)
+    print("  Model saved to: models/artifacts/l4_return_predictor.joblib")
+    print("  Features include: Technical indicators + L1 macro features")
+    print("  Model will automatically adjust predictions based on market environment")
+    print("=" * 60)
 
 if __name__ == "__main__":
     train_l4_model()
