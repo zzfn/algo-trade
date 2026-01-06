@@ -39,17 +39,29 @@ class RankingModelTrainer:
         
         print(f"正在训练排序模型... 总组数: {len(groups)}, 训练组数: {len(train_groups)}, 测试组数: {len(test_groups)}")
         
+        # 尝试加载优化后的参数
+        params = {
+            "objective": "lambdarank",
+            "metric": "ndcg",
+            "num_leaves": 31,
+            "learning_rate": 0.05,
+            "n_estimators": 100,
+            "subsample": 0.8,         # 默认值
+            "colsample_bytree": 0.8,  # 默认值
+            "importance_type": 'gain',
+            "random_state": 42,
+            "verbosity": -1
+        }
+        
+        best_params = self._load_best_params()
+        if best_params:
+            print(f"✨ 使用优化后的参数: {best_params}")
+            params.update(best_params)
+        
         # 5. 模型配置
         self.model = lgb.LGBMRanker(
-            objective="lambdarank",
-            metric="ndcg",
-            num_leaves=31,
-            learning_rate=0.05,
-            n_estimators=100,
-            importance_type='gain',
-            label_gain=np.arange(max(y) + 1).tolist(), # 针对打分的增益设置
-            random_state=42,
-            verbosity=-1
+            **params,
+            label_gain=np.arange(max(y) + 1).tolist() # 针对打分的增益设置
         )
         
         # 6. 执行训练
@@ -80,6 +92,19 @@ class RankingModelTrainer:
             return self.model.predict(X)
         return np.array([])
     
+    def _load_best_params(self) -> dict:
+        """从 JSON 文件加载最佳参数"""
+        try:
+            path = Path('models/best_params.json')
+            if path.exists():
+                with open(path, 'r') as f:
+                    all_params = json.load(f)
+                    # 查找对应的模型参数 (这里假设我们只关心 l2_ranker)
+                    return all_params.get('l2_ranker', {})
+        except Exception as e:
+            print(f"⚠️  加载最佳参数失败: {e}")
+        return {}
+
     def optimize(self, df: pd.DataFrame, feature_cols: List[str], target_col: str, n_trials: int = 50) -> dict:
         """使用 Optuna 优化超参数"""
         print(f"\n🔍 开始 Optuna 超参数优化 (L2 Ranker)... 试验次数: {n_trials}")
