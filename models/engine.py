@@ -43,7 +43,7 @@ class StrategyEngine:
         
         # --- L1: Market Timing ---
         l1_start = target_dt - timedelta(days=L1_LOOKBACK_DAYS)
-        df_l1_dict = {sym: self.provider.fetch_bars(sym, TimeFrame.Day, l1_start, target_dt + timedelta(days=1)) for sym in self.l1_symbols}
+        df_l1_dict = {sym: self.provider.fetch_bars(sym, TimeFrame.Day, l1_start, target_dt + timedelta(days=1), use_redis=True) for sym in self.l1_symbols}
         df_l1_feats = self.l1_builder.build_l1_features(df_l1_dict)
         df_l1_feats = df_l1_feats[df_l1_feats['timestamp'] <= target_dt]
         
@@ -59,7 +59,7 @@ class StrategyEngine:
 
         # --- L2: Stock Selection (15min) ---
         l2_start = target_dt - timedelta(days=L2_LOOKBACK_DAYS)
-        df_l2_raw = self.provider.fetch_bars(self.l2_symbols, TimeFrame(15, TimeFrameUnit.Minute), l2_start, target_dt + timedelta(days=1))
+        df_l2_raw = self.provider.fetch_bars(self.l2_symbols, TimeFrame(15, TimeFrameUnit.Minute), l2_start, target_dt + timedelta(days=1), use_redis=True)
         df_l2_feats = self.l2_builder.add_all_features(df_l2_raw, is_training=False)
         
         l2_valid = df_l2_feats[df_l2_feats['timestamp'] <= target_dt]
@@ -84,7 +84,7 @@ class StrategyEngine:
         # --- L3: Trend Confirmation ---
         all_l2_symbols = l2_latest['symbol'].tolist()
         l3_start = target_dt - timedelta(days=L3_LOOKBACK_DAYS)
-        df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame.Minute, l3_start, target_dt + timedelta(days=1))
+        df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame.Minute, l3_start, target_dt + timedelta(days=1), use_redis=True)
         df_l3_feats = self.l2_builder.add_all_features(df_l3_raw, is_training=False)
         
         l3_valid = df_l3_feats[df_l3_feats['timestamp'] <= target_dt]

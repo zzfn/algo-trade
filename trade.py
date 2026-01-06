@@ -89,7 +89,7 @@ class TradingBot:
         try:
             # 获取最近 30 天的 SPY 数据
             spy_start = target_dt - timedelta(days=45)
-            spy_data = self.engine.provider.fetch_bars(['SPY'], TimeFrame.Day, spy_start, target_dt)
+            spy_data = self.engine.provider.fetch_bars(['SPY'], TimeFrame.Day, spy_start, target_dt, use_redis=True)
             
             if not spy_data.empty:
                 # 计算市场特征

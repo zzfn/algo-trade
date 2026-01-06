@@ -29,9 +29,20 @@ def setup_logger(name: str = "algo_trade", level: str = "INFO", log_file: str = 
     
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     
+    # 强制日志时间使用美东时间
+    import pytz
+    ny_tz = pytz.timezone('America/New_York')
+    
+    # 必须将其包装为静态方法，否则赋值给类属性后，实列调用时会自动传入 self (Formatter对象)
+    # 导致 et_converter(self, seconds) -> fromtimestamp(self) -> TypeError
+    def et_converter(seconds):
+        return datetime.fromtimestamp(seconds, ny_tz).timetuple()
+        
+    logging.Formatter.converter = staticmethod(et_converter)
+
     # 控制台输出格式 (带颜色和 emoji 友好)
     console_formatter = logging.Formatter(
-        fmt="%(message)s",
+        fmt="%(asctime)s %(message)s",
         datefmt="%H:%M:%S"
     )
     
