@@ -44,7 +44,15 @@ class DataProvider:
             use_redis: 如果为 True,则尝试使用 Redis 进行增量更新
         """
         if end is None:
-            end = datetime.now()
+            # 强制将本地时间视为北京时间 (Asia/Shanghai)，然后转为 UTC/NY
+            # 这是为了解决用户系统时区设置不正确的问题
+            import pytz
+            local_naive = datetime.now()
+            beijing_tz = pytz.timezone('Asia/Shanghai')
+            # 假定本地时间就是北京时间
+            local_aware = beijing_tz.localize(local_naive)
+            # 转为 UTC 供后续使用
+            end = local_aware.astimezone(pytz.utc)
             
         # --- Redis 增量更新逻辑 ---
         if use_redis:
@@ -106,6 +114,7 @@ class DataProvider:
                     else:
                         show_end = show_end.astimezone(ny_tz)
                         
+                    print(f"DEBUG TIME: Now(UTC)={end} | End(ET)={show_end}")
                     print(f"⬇️  Fetching batch data from API ({show_start.strftime('%Y-%m-%d %H:%M:%S')} ET -> {show_end.strftime('%Y-%m-%d %H:%M:%S')} ET)...")
                     request_params = StockBarsRequest(
                         symbol_or_symbols=sym_list,
@@ -117,6 +126,7 @@ class DataProvider:
                     try:
                         bars = self.client.get_stock_bars(request_params)
                         new_df = bars.df
+                        print(f"✅ API returned {len(new_df)} rows of data.")
                         
                         if not new_df.empty:
                             # 统一格式处理

@@ -57,6 +57,13 @@ class TradingBot:
         # 1. 检查市场是否开放
         try:
             clock = self.trading_client.get_clock()
+            # 使用 Alpaca 服务器时间作为基准 (避免本地时间错误)
+            server_now = clock.timestamp.astimezone(self.ny_tz)
+            logger.info(f"⏰ Server Time: {server_now.strftime('%Y-%m-%d %H:%M:%S')} ET")
+            
+            # 使用服务器时间更新 target_dt
+            target_dt = server_now.replace(tzinfo=None)
+            
             if not clock.is_open:
                 next_open = clock.next_open.astimezone(self.ny_tz)
                 next_close = clock.next_close.astimezone(self.ny_tz) if clock.next_close else None
@@ -70,7 +77,9 @@ class TradingBot:
                 logger.info(f"✅ 市场开放中 (收盘时间: {clock.next_close.astimezone(self.ny_tz).strftime('%H:%M:%S')} ET)")
         except Exception as e:
             logger.warning(f"⚠️  无法获取市场状态: {e}")
-            logger.warning("   继续执行(假设市场开放)...")
+            logger.warning("   继续执行(使用本地时间)...")
+            # fallback to local time if clock fails
+            target_dt = datetime.now(self.ny_tz).replace(tzinfo=None)
         
         # 2. 检查账户与持仓
         account = self.get_account_info()
@@ -159,7 +168,7 @@ class TradingBot:
         short_signals = self.engine.filter_signals(l3_signals, direction="short", top_n=current_top_n, threshold=current_threshold)
 
         # 5. 持仓管理 (动态止盈止损 / 信号平仓)
-        self.manage_positions(l3_signals, all_ranked)
+        closed_symbols = self.manage_positions(l3_signals, all_ranked)
 
         # 6. 信号执行 (Signal Execution)
         # L1 作为风险因子: 不安全时降低仓位而非禁止交易
@@ -172,7 +181,7 @@ class TradingBot:
         # 多头信号
         executed_longs = 0
         for _, signal in long_signals.iterrows():
-            success = self.execute_trade(signal['symbol'], OrderSide.BUY, "long", all_ranked, price=signal['close'], l1_safe=l1_safe)
+            success = self.execute_trade(signal['symbol'], OrderSide.BUY, "long", all_ranked, price=signal['close'], l1_safe=l1_safe, closed_symbols=closed_symbols)
             if success:
                 executed_longs += 1
         if executed_longs > 0:
@@ -181,7 +190,7 @@ class TradingBot:
         # 空头信号
         executed_shorts = 0
         for _, signal in short_signals.iterrows():
-            success = self.execute_trade(signal['symbol'], OrderSide.SELL, "short", all_ranked, price=signal['close'], l1_safe=l1_safe)
+            success = self.execute_trade(signal['symbol'], OrderSide.SELL, "short", all_ranked, price=signal['close'], l1_safe=l1_safe, closed_symbols=closed_symbols)
             if success:
                 executed_shorts += 1
         if executed_shorts > 0:
@@ -197,9 +206,11 @@ class TradingBot:
             l3_signals: L3 趋势信号 DataFrame
             l2_ranked: L2 排序后的 DataFrame (用于获取特征和计算风控参数)
         """
+
         positions = self.get_positions()
+        closed_symbols = set()
         if not positions:
-            return
+            return closed_symbols
 
         logger.info(f"🔄 正在检查 {len(positions)} 个持仓的动态管理...")
 
@@ -278,21 +289,18 @@ class TradingBot:
                     # 2. 执行平仓
                     self.trading_client.close_position(symbol)
                     logger.info(f"✅ 已执行平仓: {symbol}")
+                    closed_symbols.add(symbol)
                 except Exception as e:
                     logger.error(f"❌ 平仓失败 {symbol}: {e}")
-
-    def execute_trade(self, symbol, side, direction, l2_ranked, price, l1_safe=True):
-        """
-        执行交易，返回 True 表示成功执行，False 表示跳过
         
-        Args:
-            symbol: 标的代码
-            side: 交易方向 (BUY/SELL)
-            direction: 'long' 或 'short'
-            l2_ranked: L2 排序数据
-            price: 当前价格
-            l1_safe: L1 市场安全标志 (用于调整仓位)
-        """
+        return closed_symbols
+
+    def execute_trade(self, symbol, side, direction, l2_ranked, price, l1_safe=True, closed_symbols=None):
+
+        if closed_symbols and symbol in closed_symbols:
+            logger.info(f"ℹ️ {symbol} 本轮刚触发平仓，跳过开仓 (等待订单结算)。")
+            return False
+
         positions = self.get_positions()
 
 

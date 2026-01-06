@@ -22,14 +22,20 @@ def get_smc_stop_loss(row: pd.Series, direction: str) -> float:
     Returns:
         止损价格
     """
+    atr = row.get('atr', row['close'] * 0.02)  # 默认 2% 波动作为 ATR 替代
+    
     if direction == "long":
         # 做多止损在 Swing Low 下方
         swing_low = row.get('local_low', row['close'] * 0.98)
-        return swing_low * (1 - STOP_LOSS_BUFFER)
+        # 确保止损至少距离现价 0.5 * ATR，防止过近
+        min_sl = row['close'] - 0.5 * atr
+        return min(swing_low * (1 - STOP_LOSS_BUFFER), min_sl)
     else:
         # 做空止损在 Swing High 上方
         swing_high = row.get('local_high', row['close'] * 1.02)
-        return swing_high * (1 + STOP_LOSS_BUFFER)
+        # 确保止损至少距离现价 0.5 * ATR，防止过近
+        min_sl = row['close'] + 0.5 * atr
+        return max(swing_high * (1 + STOP_LOSS_BUFFER), min_sl)
 
 
 def get_smc_take_profit(row: pd.Series, direction: str, risk_reward: float = None) -> float:

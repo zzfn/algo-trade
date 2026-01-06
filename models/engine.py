@@ -106,6 +106,15 @@ class StrategyEngine:
             
             results['l3_signals'] = l3_latest
             results['l3_timestamp'] = last_ts
+            
+            # --- Freshness Check ---
+            # 如果最新的 L3 数据 (1分钟线) 滞后超过 15 分钟 (允许少量延迟), 则认为是过期数据
+            time_lag = target_dt - last_ts
+            if time_lag > timedelta(minutes=15):
+                print(f"⚠️  Data Stale Warning: Latest data is from {last_ts}, lag is {time_lag}. Skipping trading.")
+                results['l3_signals'] = pd.DataFrame() # Clear signals to prevent trading
+            elif time_lag > timedelta(minutes=5):
+                 print(f"⚠️  Data Lag Warning: Latest data is from {last_ts}, lag is {time_lag}.")
 
         return results
 
