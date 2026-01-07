@@ -135,7 +135,7 @@ class BacktestEngine:
             self._process_bar(current_ts)
             
         # 4. 生成报告
-        self._generate_report(timeframe)
+        return self._generate_report(timeframe)
 
     def _prepare_data(self, symbols, timeframe, start_date, end_date):
         logger.info("📥 正在预加载数据与特征...")
@@ -287,78 +287,79 @@ class BacktestEngine:
         df_hist = pd.DataFrame(self.history).set_index('timestamp')
         if df_hist.empty:
             print("❌ 无回测数据")
-            return
+            return {
+                "error": "No data",
+                "stats": {},
+                "equity_curve": [],
+                "trades": []
+            }
             
         # 计算基础指标
         total_ret = (self.equity / self.initial_equity) - 1
         days = (df_hist.index[-1] - df_hist.index[0]).days
-        annual_ret = (1 + total_ret) ** (365 / days) - 1 if days > 0 else 0
+        annual_ret = (1 + total_ret) ** (365 / max(days, 1)) - 1
         
         # 最大回撤
         roll_max = df_hist['equity'].cummax()
         dd = df_hist['equity'] / roll_max - 1
         mdd = dd.min()
         
-        # 显示当前持仓
-        current_holdings_pnl = 0.0
-        if self.positions:
-            print(f"\n💼 当前持仓 ({len(self.positions)}):")
-            print(f"{'代码':<6} | {'方向':<6} | {'入场价':<10} | {'当前价':<10} | {'浮动盈亏':<10} | {'回报率':<8}")
-            print("-" * 70)
-            for p in self.positions:
-                # 获取该标的最后已知价格
-                last_price = p.entry_price # 默认 (如果没有更新数据)
-                if p.symbol in self.bars:
-                     # 尝试拿最后一根 K 线的收盘价
-                    last_price = self.bars[p.symbol].iloc[-1]['close']
-                
-                if p.direction == 'long':
-                    unrealized_pnl = (last_price - p.entry_price) * p.size
-                    ret = (last_price / p.entry_price) - 1
-                else:
-                    unrealized_pnl = (p.entry_price - last_price) * p.size
-                    ret = 1 - (last_price / p.entry_price)
-                
-                current_holdings_pnl += unrealized_pnl
-                icon = "🟢" if unrealized_pnl > 0 else "🔴"
-                print(f"{p.symbol:<6} | {p.direction:<6} | ${p.entry_price:<9.2f} | ${last_price:<9.2f} | {icon} ${unrealized_pnl:<8.2f} | {ret:<+7.2%}")
-            
-            print(f"当前持仓总浮亏: ${current_holdings_pnl:.2f}")
-
         # 交易统计
         all_closed = self.closed_positions
-        if not all_closed:
-            print("⚠️ 期间无平仓交易")
-        else:
-            wins = [p for p in all_closed if p.pnl > 0]
-            losses = [p for p in all_closed if p.pnl <= 0]
-            win_rate = len(wins) / len(all_closed)
-            avg_win = np.mean([p.pnl for p in wins]) if wins else 0
-            avg_loss = np.mean([p.pnl for p in losses]) if losses else 0
-            profit_factor = abs(sum(p.pnl for p in wins) / sum(p.pnl for p in losses)) if losses else float('inf')
+        wins = [p for p in all_closed if p.pnl > 0]
+        losses = [p for p in all_closed if p.pnl <= 0]
+        win_rate = len(wins) / len(all_closed) if all_closed else 0
+        avg_win = np.mean([p.pnl for p in wins]) if wins else 0
+        avg_loss = np.mean([p.pnl for p in losses]) if losses else 0
+        profit_factor = abs(sum(p.pnl for p in wins) / sum(p.pnl for p in losses)) if losses and sum(p.pnl for p in losses) != 0 else float('inf')
+        
+        # 打印日志 (保留控制台输出)
+        print(f"📊 资金表现:")
+        print(f"  初始资金: ${self.initial_equity:,.2f}")
+        print(f"  最终权益: ${self.equity:,.2f} ({total_ret:+.2%})")
+        print(f"  年化收益: {annual_ret:+.2%}")
+        print(f"  最大回撤: {mdd:.2%}")
+        print(f"  胜率:     {win_rate:.1%} ({len(wins)} 胜 / {len(losses)} 负)")
+        
+        # 构建返回数据结构
+        # 1. 资金曲线 (用于绘图) - 抽样减少数据量 (例如最多返回 500 个点)
+        step = max(1, len(df_hist) // 500)
+        equity_curve = []
+        for ts, row in df_hist.iloc[::step].iterrows():
+            equity_curve.append({
+                "time": ts.isoformat(),
+                "value": float(row['equity'])
+            })
             
-            print(f"📊 资金表现:")
-            print(f"  初始资金: ${self.initial_equity:,.2f}")
-            print(f"  最终权益: ${self.equity:,.2f} ({total_ret:+.2%})")
-            print(f"  年化收益: {annual_ret:+.2%}")
-            print(f"  最大回撤: {mdd:.2%}")
+        # 2. 交易记录
+        trades = []
+        for p in all_closed:
+            trades.append({
+                "symbol": p.symbol,
+                "direction": p.direction,
+                "entry_time": p.entry_time.isoformat(),
+                "exit_time": p.exit_time.isoformat() if p.exit_time else None,
+                "entry_price": float(p.entry_price),
+                "exit_price": float(p.exit_price),
+                "pnl": float(p.pnl),
+                "return_pct": float(p.return_pct),
+                "reason": p.exit_reason
+            })
             
-            print(f"\n🎯 交易统计:")
-            print(f"  总交易数: {len(all_closed)}")
-            print(f"  胜率:     {win_rate:.1%} ({len(wins)} 胜 / {len(losses)} 负)")
-            print(f"  盈亏比:   {profit_factor:.2f}")
-            print(f"  平均盈利: ${avg_win:.2f}")
-            print(f"  平均亏损: ${avg_loss:.2f}")
-            
-            # 显示最近 5 笔交易
-            print(f"\n📝 最近 10 笔交易记录:")
-            print(f"{'时间':<20} | {'代码':<5} | {'方向':<5} | {'PnL':<10} | {'回报率':<8} | {'原因'}")
-            print("-" * 80)
-            for p in all_closed[-10:]:
-                icon = "🟢" if p.pnl > 0 else "🔴"
-                print(f"{str(p.exit_time):<20} | {p.symbol:<5} | {p.direction:<5} | {icon} ${p.pnl:<8.2f} | {p.return_pct:<+7.2%} | {p.exit_reason}")
-                
-        print("="*80)
+        return {
+            "stats": {
+                "initial_equity": float(self.initial_equity),
+                "final_equity": float(self.equity),
+                "total_return": float(total_ret),
+                "annual_return": float(annual_ret),
+                "max_drawdown": float(mdd),
+                "win_rate": float(win_rate),
+                "total_trades": len(all_closed),
+                "profit_factor": float(profit_factor) if profit_factor != float('inf') else 999.0
+            },
+            "equity_curve": equity_curve,
+            "trades": trades
+        }
 
 def main():
     parser = argparse.ArgumentParser()

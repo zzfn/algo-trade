@@ -524,6 +524,14 @@
           const res = await fetch("/api/models/l4");
           return res.json();
         },
+        async runBacktest(params) {
+          const res = await fetch("/api/backtest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(params),
+          });
+          return res.json();
+        },
       };
 
       // Header组件
@@ -1435,6 +1443,204 @@
         );
       }
 
+      // 回测标签页
+      function BacktestTab() {
+        const [params, setParams] = useState({
+          days: 90,
+          timeframe: "1h",
+          symbols: "",
+        });
+        const [result, setResult] = useState(null);
+        const [loading, setLoading] = useState(false);
+        const [error, setError] = useState(null);
+
+        const handleRun = async () => {
+          setLoading(true);
+          setError(null);
+          setResult(null); // Clear previous results
+          try {
+            const res = await api.runBacktest({
+              ...params,
+              days: parseInt(params.days),
+            });
+            // Handle FastAPI errors
+            if (res.detail) throw new Error(res.detail);
+            // Handle custom Logic errors
+            if (res.error) throw new Error(res.error);
+            // Validate response structure
+            if (!res.stats) throw new Error("返回数据格式错误 (缺少 stats)");
+
+            setResult(res);
+          } catch (err) {
+            console.error(err);
+            setError(err.message);
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        return (
+          <div className="card">
+            <h2>⏮️ 策略回测</h2>
+
+            <div className="input-section">
+              <div style={{ flex: 1, minWidth: "150px" }}>
+                <div className="metric-label">回测天数</div>
+                <input
+                  type="number"
+                  value={params.days}
+                  onChange={(e) =>
+                    setParams({ ...params, days: e.target.value })
+                  }
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: "150px" }}>
+                <div className="metric-label">周期 (1h/15m/1d)</div>
+                <input
+                  type="text"
+                  value={params.timeframe}
+                  onChange={(e) =>
+                    setParams({ ...params, timeframe: e.target.value })
+                  }
+                />
+              </div>
+              <div style={{ flex: 2, minWidth: "300px" }}>
+                <div className="metric-label">标的 (可选, 逗号分隔)</div>
+                <input
+                  type="text"
+                  placeholder="默认: 此时所有 L2 标的"
+                  value={params.symbols}
+                  onChange={(e) =>
+                    setParams({ ...params, symbols: e.target.value })
+                  }
+                />
+              </div>
+              <div style={{ alignSelf: "flex-end" }}>
+                <button className="btn" onClick={handleRun} disabled={loading}>
+                  {loading ? "⏳ 运行中..." : "▶️ 开始回测"}
+                </button>
+              </div>
+            </div>
+
+            {error && <div className="error">❌ {error}</div>}
+
+            {result && (
+              <>
+                <h3>回测结果</h3>
+                <div className="metric-grid">
+                  <div className="metric-card">
+                    <div className="metric-label">总回报率</div>
+                    <div
+                      className={`metric-value ${
+                        result.stats.total_return >= 0 ? "green" : "red"
+                      }`}
+                    >
+                      {(result.stats.total_return * 100).toFixed(2)}%
+                    </div>
+                  </div>
+                  <div className="metric-card">
+                    <div className="metric-label">最大回撤</div>
+                    <div className="metric-value red">
+                      {(result.stats.max_drawdown * 100).toFixed(2)}%
+                    </div>
+                  </div>
+                  <div className="metric-card">
+                    <div className="metric-label">胜率</div>
+                    <div className="metric-value">
+                      {(result.stats.win_rate * 100).toFixed(1)}%
+                    </div>
+                  </div>
+                  <div className="metric-card">
+                    <div className="metric-label">盈亏比</div>
+                    <div className="metric-value">
+                      {result.stats.profit_factor.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                <h3>资金曲线</h3>
+                <div
+                  style={{
+                    height: "200px",
+                    display: "flex",
+                    alignItems: "flex-end",
+                    gap: "2px",
+                    background: "rgba(0,0,0,0.2)",
+                    padding: "1rem",
+                    borderRadius: "8px",
+                    marginBottom: "2rem",
+                    overflowX: "auto",
+                  }}
+                >
+                  {result.equity_curve.map((pt, i) => {
+                    const minVal = result.stats.initial_equity * 0.8;
+                    const maxVal = Math.max(
+                      ...result.equity_curve.map((p) => p.value)
+                    );
+                    const range = maxVal - minVal;
+                    const height = ((pt.value - minVal) / (range || 1)) * 100;
+
+                    return (
+                      <div
+                        key={i}
+                        title={`${pt.time}: $${pt.value.toFixed(0)}`}
+                        style={{
+                          flex: 1,
+                          height: `${Math.max(5, height)}%`,
+                          background:
+                            pt.value >= result.stats.initial_equity
+                              ? "var(--profit-green)"
+                              : "var(--loss-red)",
+                          minWidth: "2px",
+                          opacity: 0.8,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+
+                <h3>交易列表 ({result.trades.length})</h3>
+                <div style={{ maxHeight: "400px", overflowY: "auto" }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>标的</th>
+                        <th>方向</th>
+                        <th>时间</th>
+                        <th>PnL</th>
+                        <th>原因</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.trades
+                        .slice()
+                        .reverse()
+                        .map((t, i) => (
+                          <tr key={i}>
+                            <td className="symbol">{t.symbol}</td>
+                            <td>
+                              <span className={`badge ${t.direction}`}>
+                                {t.direction}
+                              </span>
+                            </td>
+                            <td>
+                              {new Date(t.exit_time).toLocaleDateString()}
+                            </td>
+                            <td className={t.pnl >= 0 ? "profit" : "loss"}>
+                              ${t.pnl.toFixed(0)}
+                            </td>
+                            <td>{t.reason}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        );
+      }
+
       // 主应用
       function App() {
         const [activeTab, setActiveTab] = useState("dashboard");
@@ -1497,6 +1703,7 @@
           { id: "l2", label: "L2 筛选", icon: "🎯" },
           { id: "l3", label: "L3 趋势", icon: "📉" },
           { id: "l4", label: "L4 风控", icon: "🛡️" },
+          { id: "backtest", label: "⏮️ 策略回测", icon: "⏮️" },
         ];
 
         return (
@@ -1552,6 +1759,7 @@
               {activeTab === "l2" && <L2DebugTab />}
               {activeTab === "l3" && <L3DebugTab />}
               {activeTab === "l4" && <L4DebugTab />}
+              {activeTab === "backtest" && <BacktestTab />}
             </main>
           </>
         );

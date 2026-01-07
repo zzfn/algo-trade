@@ -406,6 +406,57 @@ async def get_l4_debug():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== 回测 API ====================
+
+from pydantic import BaseModel
+class BacktestRequest(BaseModel):
+    symbols: str = None # 逗号分隔，为空则使用默认池
+    timeframe: str = "1h"
+    days: int = 90
+    top_n: int = 2
+
+@app.post("/api/backtest")
+async def run_backtest_api(req: BacktestRequest):
+    """运行回测"""
+    try:
+        from scripts.backtest import BacktestEngine
+        from datetime import datetime, timedelta
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+        from models.constants import L2_SYMBOLS
+        
+        # 1. 解析参数
+        if req.symbols:
+            symbols = [s.strip().upper() for s in req.symbols.split(',') if s.strip()]
+        else:
+            symbols = L2_SYMBOLS
+            
+        # 2. 解析 TimeFrame
+        tf_map = {
+            '1h': TimeFrame.Hour, 
+            '15m': TimeFrame(15, TimeFrameUnit.Minute), 
+            '1d': TimeFrame.Day
+        }
+        tf = tf_map.get(req.timeframe, TimeFrame.Hour)
+        
+        # 3. 确定时间范围
+        start_date = datetime.now() - timedelta(days=req.days)
+        end_date = datetime.now()
+        
+        print(f"🚀 API 触发回测: {len(symbols)} 标的 | {req.timeframe} | {req.days} 天")
+        
+        # 4. 运行回测
+        engine = BacktestEngine(top_n=req.top_n)
+        result = engine.run(symbols, tf, start_date, end_date)
+        
+        return result
+        
+    except Exception as e:
+        import traceback
+        print(f"❌ 回测失败: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== 静态文件服务 ====================
 
 @app.get("/")
