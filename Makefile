@@ -129,3 +129,7 @@ dashboard:
 	@echo "🚀 启动 Dashboard 服务器..."
 	@echo "访问: http://localhost:8000"
 	PYTHONPATH=. uv run uvicorn web.server:app --host 0.0.0.0 --port 8000 --reload
+
+# 启动完整系统 (交易机器人 + Dashboard)
+run:
+	PYTHONPATH=. uv run python main.py
