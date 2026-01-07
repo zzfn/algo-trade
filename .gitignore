@@ -14,3 +14,18 @@ wheels/
 
 # OS generated files
 .DS_Store
+
+# Logs
+logs/
+*.log
+
+# app data
+data/cache/
+data/trading_state.json
+data/*.csv
+data/cache
+*.parquet
+
+# IDE
+.idea/
+.vscode/
