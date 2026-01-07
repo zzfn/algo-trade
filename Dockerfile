@@ -26,5 +26,7 @@ RUN uv sync --no-install-project
 COPY . .
 RUN uv sync
 
+EXPOSE 8000
+
 # 设置默认命令
 CMD ["uv", "run","main.py"]
