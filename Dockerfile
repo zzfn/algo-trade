@@ -27,4 +27,4 @@ COPY . .
 RUN uv sync
 
 # 设置默认命令
-CMD ["uv", "run"]
+CMD ["uv", "run","main.py"]
