@@ -83,8 +83,18 @@ class RedisDataManager:
             # ZADD key score member
             pipeline.zadd(key, {data_json: timestamp_score})
             
+        # --- 数据清理 (Trim) ---
+        # 保留最近的 N 条数据, 防止无限增长
+        # L3 需要 10天分钟线: 10 * 390 = 3900 -> 保留 5000 条足够安全且覆盖 L3 需求
+        # L1 需要 300天日线: 300 -> 5000 条远超需求
+        KEEP_COUNT = 5000
+        
+        # 移除排名在 0 到 -(KEEP_COUNT + 1) 的元素
+        # 即: 只保留最后 KEEP_COUNT 个
+        pipeline.zremrangebyrank(key, 0, -(KEEP_COUNT + 1))
+            
         pipeline.execute()
-        print(f"💾 Saved {len(df)} bars to Redis: {key}")
+        print(f"💾 Saved {len(df)} bars to Redis: {key} (Trimmed to last {KEEP_COUNT})")
 
     def get_bars(self, symbol: str, timeframe: TimeFrame, start: datetime, end: datetime) -> pd.DataFrame:
         """从 Redis 获取指定时间范围的数据"""

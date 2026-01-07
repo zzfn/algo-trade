@@ -1,0 +1,5 @@
+2026-01-07 21:49:27.154 | INFO     | data.streamer:__init__:36 - 📋 订阅标的 (12): ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'AVGO', 'MU', 'AMD', 'ORCL', 'INTC']
+2026-01-07 21:49:27.154 | INFO     | data.streamer:run:73 - 🚀 启动 Market Data Streamer (Websocket)...
+2026-01-07 21:53:00.165 | INFO     | data.streamer:bar_handler:45 - 📡 接收到 Bar: GOOGL @ 13:52 | Close: 315.5
+2026-01-07 21:54:00.171 | INFO     | data.streamer:bar_handler:45 - 📡 接收到 Bar: NVDA @ 13:53 | Close: 187.94
+2026-01-07 21:56:00.083 | INFO     | data.streamer:bar_handler:45 - 📡 接收到 Bar: TSLA @ 13:55 | Close: 434.94

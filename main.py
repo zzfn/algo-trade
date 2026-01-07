@@ -23,6 +23,16 @@ def start_web_server():
     # host="0.0.0.0" 允许外部访问, port=8000
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
+def start_data_streamer():
+    """启动实时数据流服务"""
+    print("📡 正在启动数据流服务 (Data Streamer)...")
+    try:
+        from data.streamer import MarketDataStreamer
+        streamer = MarketDataStreamer()
+        streamer.run()
+    except Exception as e:
+        print(f"❌ 数据流服务发生错误: {e}")
+
 def main():
     # 设置启动方式 (兼容 macOS/Windows)
     multiprocessing.set_start_method("spawn", force=True)
@@ -30,14 +40,18 @@ def main():
     # 创建子进程
     trade_process = multiprocessing.Process(target=start_trade_bot, name="TradeBot")
     web_process = multiprocessing.Process(target=start_web_server, name="WebServer")
+    stream_process = multiprocessing.Process(target=start_data_streamer, name="DataStreamer")
 
     # 启动进程
+    stream_process.start()
+    time.sleep(2) # 等待 Streamer 先初始化
     trade_process.start()
     web_process.start()
 
     print(f"✅ 服务已启动:")
-    print(f"   - Trade Bot PID: {trade_process.pid}")
-    print(f"   - Web Server PID: {web_process.pid}")
+    print(f"   - Data Stream  PID: {stream_process.pid}")
+    print(f"   - Trade Bot    PID: {trade_process.pid}")
+    print(f"   - Web Server   PID: {web_process.pid}")
     print(f"👉 Dashboard 地址: http://localhost:8000")
 
     try:
@@ -46,23 +60,33 @@ def main():
             time.sleep(1)
             
             # 检查进程是否存活
+            if not stream_process.is_alive():
+                 print("⚠️ 数据流服务进程意外退出!")
+                 trade_process.terminate()
+                 web_process.terminate()
+                 break
+
             if not trade_process.is_alive():
                 print("⚠️ 交易机器人进程意外退出!")
                 web_process.terminate()
+                stream_process.terminate()
                 break
             
             if not web_process.is_alive():
                 print("⚠️ Web Server 进程意外退出!")
                 trade_process.terminate()
+                stream_process.terminate()
                 break
                 
     except KeyboardInterrupt:
         print("\n🛑 接收到停止指令, 正在停止所有服务...")
         trade_process.terminate()
         web_process.terminate()
+        stream_process.terminate()
         
         trade_process.join()
         web_process.join()
+        stream_process.join()
         print("✅ 所有服务已安全停止。")
 
 if __name__ == "__main__":

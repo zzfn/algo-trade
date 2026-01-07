@@ -1,9 +1,9 @@
 {
   "account": {
-    "equity": 999981.3,
+    "equity": 999814.06,
     "cash": 1048598.33,
     "buying_power": 3909808.48,
-    "portfolio_value": 999981.3
+    "portfolio_value": 999814.06
   },
   "positions": [
     {
@@ -11,54 +11,54 @@
       "side": "long",
       "qty": "48",
       "avg_entry_price": 263.699796,
-      "current_price": 261.9668,
-      "unrealized_pl": -83.183808,
-      "unrealized_plpc": -0.0065718518796275
+      "current_price": 261.9,
+      "unrealized_pl": -86.390208,
+      "unrealized_plpc": -0.0068251702401772
     },
     {
       "symbol": "AVGO",
       "side": "short",
       "qty": "-36",
       "avg_entry_price": 343.614905,
-      "current_price": 342.42,
-      "unrealized_pl": 43.01658,
-      "unrealized_plpc": 0.003477453924765
+      "current_price": 342.6,
+      "unrealized_pl": 36.53658,
+      "unrealized_plpc": 0.0029536116892252
     },
     {
       "symbol": "INTC",
       "side": "short",
       "qty": "-322",
       "avg_entry_price": 39.506278,
-      "current_price": 39.96,
-      "unrealized_pl": -146.098484,
-      "unrealized_plpc": -0.0114848075538779
+      "current_price": 40.4405,
+      "unrealized_pl": -300.819484,
+      "unrealized_plpc": -0.0236474314284935
     },
     {
       "symbol": "META",
       "side": "short",
       "qty": "-15",
       "avg_entry_price": 655.880593,
-      "current_price": 658.3,
-      "unrealized_pl": -36.291105,
-      "unrealized_plpc": -0.0036887918712972
+      "current_price": 658.01,
+      "unrealized_pl": -31.941105,
+      "unrealized_plpc": -0.0032466382184905
     },
     {
       "symbol": "MU",
       "side": "short",
       "qty": "-40",
       "avg_entry_price": 332.158721,
-      "current_price": 338.5,
-      "unrealized_pl": -253.65116,
-      "unrealized_plpc": -0.0190911109631832
+      "current_price": 338.08,
+      "unrealized_pl": -236.85116,
+      "unrealized_plpc": -0.0178266552272761
     },
     {
       "symbol": "ORCL",
       "side": "short",
       "qty": "-65",
       "avg_entry_price": 192.656,
-      "current_price": 193.58,
-      "unrealized_pl": -60.06,
-      "unrealized_plpc": -0.0047961132796279
+      "current_price": 193.9489,
+      "unrealized_pl": -84.0385,
+      "unrealized_plpc": -0.0067109251723279
     }
   ],
   "signals": {
@@ -67,7 +67,7 @@
   },
   "orders": [],
   "status": {
-    "last_update": "2026-01-07T08:30:41.982903-05:00",
+    "last_update": "2026-01-07T08:49:30.129669-05:00",
     "is_market_open": false,
     "l1_safe": false,
     "l1_prob": 0.0,
