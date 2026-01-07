@@ -44,7 +44,7 @@ class DataProvider:
             use_redis: 如果为 True,则尝试使用 Redis 进行增量更新
         """
         if end is None:
-            # 强制将本地时间视为北京时间 (Asia/Shanghai)，然后转为 UTC/NY
+            # 强制将本地时间视为北京时间 (Asia/Shanghai)
             # 这是为了解决用户系统时区设置不正确的问题
             import pytz
             local_naive = datetime.now()
@@ -52,8 +52,16 @@ class DataProvider:
             # 假定本地时间就是北京时间
             local_aware = beijing_tz.localize(local_naive)
             # 转为 UTC 供后续使用
-            end = local_aware.astimezone(pytz.utc)
+            end_aware = local_aware.astimezone(pytz.utc)
             
+            # 检查 start 是否为 Naive (通常意味着是 NY Time)
+            if start.tzinfo is None:
+                # 将 end 转为 Naive NY Time 以匹配 start
+                ny_tz = pytz.timezone('America/New_York')
+                end = end_aware.astimezone(ny_tz).replace(tzinfo=None)
+            else:
+                end = end_aware
+
         # --- Redis 增量更新逻辑 ---
         if use_redis:
             try:
@@ -104,7 +112,10 @@ class DataProvider:
                     
                     show_start = active_start_time
                     if show_start.tzinfo is None:
-                        show_start = pytz.utc.localize(show_start).astimezone(ny_tz)
+                        # Assumed to be Naive NY Time (based on project convention)
+                        import pytz
+                        ny_tz = pytz.timezone('America/New_York')
+                        show_start = ny_tz.localize(show_start)
                     else:
                         show_start = show_start.astimezone(ny_tz)
                         
@@ -129,6 +140,8 @@ class DataProvider:
                         print(f"✅ API returned {len(new_df)} rows of data.")
                         
                         if not new_df.empty:
+                            print(f"🔍 API Data Preview:\n{new_df.iloc[[0, -1]][['timestamp']] if 'timestamp' in new_df.columns else new_df.index[[0, -1]]}")
+
                             # 统一格式处理
                             if isinstance(new_df.index, pd.MultiIndex):
                                 new_df = new_df.reset_index()
@@ -147,7 +160,9 @@ class DataProvider:
                                 redis_mgr.save_bars(group, sym, timeframe)
                                 
                     except Exception as e:
+                        import traceback
                         print(f"⚠️  Batch fetch failed (maybe no new data): {e}")
+                        print(traceback.format_exc())
 
                 # 4. 从 Redis 组装完整数据集返回
                 import pytz

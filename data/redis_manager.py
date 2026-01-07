@@ -35,7 +35,12 @@ class RedisDataManager:
         result = self.redis.zrange(key, -1, -1, withscores=True)
         if result:
             _, score = result[0]
-            return datetime.fromtimestamp(score)
+            # score 是 UTC 时间戳
+            import pytz
+            utc_dt = datetime.fromtimestamp(score, tz=pytz.utc)
+            ny_tz = pytz.timezone('America/New_York')
+            ny_dt = utc_dt.astimezone(ny_tz)
+            return ny_dt.replace(tzinfo=None) # 返回 Naive NY Time
         return None
 
     def save_bars(self, df: pd.DataFrame, symbol: str, timeframe: TimeFrame):
@@ -58,7 +63,17 @@ class RedisDataManager:
 
         for _, row in df.iterrows():
             ts = row['timestamp']
-            timestamp_score = ts.timestamp()
+            
+            # 统一转为 UTC 时间戳作为 score
+            # 假设 ts 是 Naive NY Time (项目约定), 先 localize 到 NY, 再转 UTC
+            if ts.tzinfo is None:
+                # 只有当它是 naive 时才当作 NY Time 处理
+                import pytz
+                ny_tz = pytz.timezone('America/New_York')
+                ts_aware = ny_tz.localize(ts)
+                timestamp_score = ts_aware.timestamp() # .timestamp() returns UTC timestamp for aware obj
+            else:
+                timestamp_score = ts.timestamp()
             
             # 序列化数据 (去除 timestamp 字段,因为它是 score)
             data_dict = row.drop('timestamp').to_dict()
@@ -87,7 +102,12 @@ class RedisDataManager:
         data_list = []
         for member, score in results:
             data = json.loads(member)
-            data['timestamp'] = datetime.fromtimestamp(score)
+            # score 是 UTC 时间戳
+            import pytz
+            utc_dt = datetime.fromtimestamp(score, tz=pytz.utc)
+            ny_tz = pytz.timezone('America/New_York')
+            ny_dt = utc_dt.astimezone(ny_tz)
+            data['timestamp'] = ny_dt.replace(tzinfo=None) # 返回 Naive NY Time
             data_list.append(data)
             
         df = pd.DataFrame(data_list)
