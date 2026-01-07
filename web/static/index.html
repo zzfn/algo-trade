@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Algo Trade Dashboard</title>
+
+    <!-- React & ReactDOM via CDN -->
+    <script
+      crossorigin
+      src="https://unpkg.com/react@18/umd/react.production.min.js"
+    ></script>
+    <script
+      crossorigin
+      src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"
+    ></script>
+
+    <!-- Babel Standalone for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --bg-primary: #0a0e27;
+        --bg-card: rgba(26, 31, 58, 0.8);
+        --border-color: rgba(99, 102, 241, 0.2);
+        --text-primary: #e2e8f0;
+        --text-secondary: #94a3b8;
+        --accent-blue: #6366f1;
+        --accent-purple: #a855f7;
+        --profit-green: #10b981;
+        --loss-red: #ef4444;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: linear-gradient(
+          135deg,
+          var(--bg-primary) 0%,
+          #1a1f3a 50%,
+          #0f172a 100%
+        );
+        color: var(--text-primary);
+        min-height: 100vh;
+      }
+
+      .header {
+        background: var(--bg-card);
+        border-bottom: 1px solid var(--border-color);
+        backdrop-filter: blur(10px);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      .header-content {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 1.5rem 2rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+      }
+
+      .header h1 {
+        font-size: 1.75rem;
+        background: linear-gradient(
+          135deg,
+          var(--accent-blue),
+          var(--accent-purple)
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+
+      .header-info {
+        display: flex;
+        gap: 1.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .status-badge {
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-weight: 500;
+        font-size: 0.9rem;
+      }
+
+      .status-badge.open {
+        background: rgba(16, 185, 129, 0.1);
+        color: var(--profit-green);
+      }
+      .status-badge.closed {
+        background: rgba(148, 163, 184, 0.1);
+        color: var(--text-secondary);
+      }
+      .status-badge.safe {
+        background: rgba(16, 185, 129, 0.1);
+        color: var(--profit-green);
+      }
+      .status-badge.unsafe {
+        background: rgba(245, 158, 11, 0.1);
+        color: #f59e0b;
+      }
+
+      .refresh-btn {
+        background: var(--accent-blue);
+        color: white;
+        border: none;
+        padding: 0.5rem 1.25rem;
+        border-radius: 8px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .refresh-btn:hover {
+        background: var(--accent-purple);
+        transform: translateY(-1px);
+      }
+
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+
+      .card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+      }
+
+      .card h2 {
+        font-size: 1.25rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .account-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1.5rem;
+      }
+
+      .account-item {
+        text-align: center;
+        padding: 1.5rem;
+        background: rgba(99, 102, 241, 0.05);
+        border-radius: 12px;
+        border: 1px solid var(--border-color);
+      }
+
+      .account-item .label {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .account-item .value {
+        font-size: 1.75rem;
+        font-weight: 700;
+        background: linear-gradient(
+          135deg,
+          var(--accent-blue),
+          var(--accent-purple)
+        );
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      thead {
+        background: rgba(99, 102, 241, 0.1);
+      }
+
+      th {
+        padding: 1rem;
+        text-align: left;
+        font-weight: 600;
+        color: var(--accent-blue);
+        border-bottom: 2px solid var(--border-color);
+      }
+
+      td {
+        padding: 1rem;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      tr:hover {
+        background: rgba(99, 102, 241, 0.05);
+      }
+
+      .symbol {
+        font-weight: 600;
+        color: var(--accent-blue);
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        font-weight: 500;
+      }
+
+      .badge.long {
+        background: rgba(16, 185, 129, 0.2);
+        color: var(--profit-green);
+      }
+      .badge.short {
+        background: rgba(239, 68, 68, 0.2);
+        color: var(--loss-red);
+      }
+
+      .profit {
+        color: var(--profit-green);
+        font-weight: 600;
+      }
+      .loss {
+        color: var(--loss-red);
+        font-weight: 600;
+      }
+
+      .signals-wrapper {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        gap: 2rem;
+      }
+
+      .signals-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 1rem;
+      }
+
+      .signal-card {
+        background: rgba(99, 102, 241, 0.05);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 1rem;
+        transition: all 0.2s;
+      }
+
+      .signal-card:hover {
+        background: rgba(99, 102, 241, 0.1);
+        transform: scale(1.02);
+      }
+
+      .signal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.75rem;
+      }
+
+      .signal-symbol {
+        font-weight: 700;
+        font-size: 1.1rem;
+      }
+
+      .signal-prob {
+        font-weight: 600;
+        padding: 0.25rem 0.75rem;
+        border-radius: 6px;
+      }
+
+      .signal-prob.long {
+        background: rgba(16, 185, 129, 0.2);
+        color: var(--profit-green);
+      }
+      .signal-prob.short {
+        background: rgba(239, 68, 68, 0.2);
+        color: var(--loss-red);
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 2rem;
+        color: var(--text-secondary);
+      }
+
+      .loading,
+      .error {
+        text-align: center;
+        padding: 3rem;
+        font-size: 1.25rem;
+      }
+
+      .error {
+        color: var(--loss-red);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect } = React;
+
+      // API 调用
+      const api = {
+        async getAccount() {
+          const res = await fetch("/api/account");
+          return res.json();
+        },
+        async getPositions() {
+          const res = await fetch("/api/positions");
+          return res.json();
+        },
+        async getSignals() {
+          const res = await fetch("/api/signals");
+          return res.json();
+        },
+        async getStatus() {
+          const res = await fetch("/api/status");
+          return res.json();
+        },
+      };
+
+      // 组件
+      function Header({ status, onRefresh }) {
+        const isMarketOpen = status?.is_market_open || false;
+        const l1Safe = status?.l1_safe || false;
+        const lastUpdate = status?.last_update;
+
+        return (
+          <header className="header">
+            <div className="header-content">
+              <h1>📊 Algo Trade Dashboard</h1>
+              <div className="header-info">
+                <div
+                  className={`status-badge ${isMarketOpen ? "open" : "closed"}`}
+                >
+                  {isMarketOpen ? "✅ 市场开放" : "⏸️ 市场关闭"}
+                </div>
+                <div className={`status-badge ${l1Safe ? "safe" : "unsafe"}`}>
+                  L1: {l1Safe ? "✅ 安全" : "⚠️ 谨慎"}
+                </div>
+                {lastUpdate && (
+                  <div
+                    style={{
+                      color: "var(--text-secondary)",
+                      fontSize: "0.85rem",
+                    }}
+                  >
+                    更新: {new Date(lastUpdate).toLocaleTimeString("zh-CN")}
+                  </div>
+                )}
+                <button className="refresh-btn" onClick={onRefresh}>
+                  🔄 刷新
+                </button>
+              </div>
+            </div>
+          </header>
+        );
+      }
+
+      function AccountCard({ account }) {
+        const { equity = 0, cash = 0, buying_power = 0 } = account || {};
+
+        return (
+          <div className="card">
+            <h2>💰 账户概览</h2>
+            <div className="account-grid">
+              <div className="account-item">
+                <div className="label">总权益</div>
+                <div className="value">
+                  $
+                  {equity.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                </div>
+              </div>
+              <div className="account-item">
+                <div className="label">现金</div>
+                <div className="value">
+                  ${cash.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                </div>
+              </div>
+              <div className="account-item">
+                <div className="label">购买力</div>
+                <div className="value">
+                  $
+                  {buying_power.toLocaleString("en-US", {
+                    minimumFractionDigits: 2,
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      function PositionsTable({ positions }) {
+        if (!positions || positions.length === 0) {
+          return (
+            <div className="card">
+              <h2>📦 当前持仓</h2>
+              <div className="empty-state">暂无持仓</div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="card">
+            <h2>📦 当前持仓 ({positions.length})</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>标的</th>
+                  <th>方向</th>
+                  <th>数量</th>
+                  <th>成本价</th>
+                  <th>现价</th>
+                  <th>盈亏</th>
+                  <th>盈亏率</th>
+                </tr>
+              </thead>
+              <tbody>
+                {positions.map((pos, idx) => {
+                  const pnl = parseFloat(pos.unrealized_pl || 0);
+                  const pnlPct = parseFloat(pos.unrealized_plpc || 0) * 100;
+                  const pnlClass = pnl >= 0 ? "profit" : "loss";
+
+                  return (
+                    <tr key={idx}>
+                      <td className="symbol">{pos.symbol}</td>
+                      <td>
+                        <span className={`badge ${pos.side}`}>
+                          {pos.side === "long" ? "做多" : "做空"}
+                        </span>
+                      </td>
+                      <td>{pos.qty}</td>
+                      <td>
+                        ${parseFloat(pos.avg_entry_price || 0).toFixed(2)}
+                      </td>
+                      <td>${parseFloat(pos.current_price || 0).toFixed(2)}</td>
+                      <td className={pnlClass}>${pnl.toFixed(2)}</td>
+                      <td className={pnlClass}>
+                        {pnlPct >= 0 ? "+" : ""}
+                        {pnlPct.toFixed(2)}%
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+
+      function SignalsPanel({ signals }) {
+        const { long = [], short = [] } = signals || {};
+
+        const renderSignals = (signalList, type) => {
+          if (signalList.length === 0) {
+            return (
+              <div className="empty-state">
+                暂无{type === "long" ? "做多" : "做空"}信号
+              </div>
+            );
+          }
+
+          return (
+            <div className="signals-grid">
+              {signalList.map((signal, idx) => {
+                const prob = parseFloat(signal[`${type}_p`] || 0) * 100;
+
+                return (
+                  <div key={idx} className="signal-card">
+                    <div className="signal-header">
+                      <span className="signal-symbol">{signal.symbol}</span>
+                      <span className={`signal-prob ${type}`}>
+                        {prob.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        color: "var(--text-secondary)",
+                        fontSize: "0.875rem",
+                      }}
+                    >
+                      现价: ${parseFloat(signal.close || 0).toFixed(2)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        };
+
+        return (
+          <div className="signals-wrapper">
+            <div className="card">
+              <h2>📈 做多信号 (Top {long.length})</h2>
+              {renderSignals(long, "long")}
+            </div>
+            <div className="card">
+              <h2>📉 做空信号 (Top {short.length})</h2>
+              {renderSignals(short, "short")}
+            </div>
+          </div>
+        );
+      }
+
+      // 主应用
+      function App() {
+        const [account, setAccount] = useState(null);
+        const [positions, setPositions] = useState([]);
+        const [signals, setSignals] = useState({ long: [], short: [] });
+        const [status, setStatus] = useState(null);
+        const [loading, setLoading] = useState(true);
+        const [error, setError] = useState(null);
+
+        const fetchData = async () => {
+          try {
+            setLoading(true);
+            setError(null);
+
+            const [accountData, positionsData, signalsData, statusData] =
+              await Promise.all([
+                api.getAccount(),
+                api.getPositions(),
+                api.getSignals(),
+                api.getStatus(),
+              ]);
+
+            setAccount(accountData);
+            setPositions(positionsData);
+            setSignals(signalsData);
+            setStatus(statusData);
+          } catch (err) {
+            setError(err.message);
+            console.error("Failed to fetch data:", err);
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        useEffect(() => {
+          fetchData();
+          const interval = setInterval(fetchData, 30000); // 30秒刷新
+          return () => clearInterval(interval);
+        }, []);
+
+        return (
+          <>
+            <Header status={status} onRefresh={fetchData} />
+            <main className="container">
+              {loading && !account && (
+                <div className="loading">⏳ 加载中...</div>
+              )}
+              {error && (
+                <div className="error">
+                  ⚠️ 数据加载失败: {error}
+                  <br />
+                  <button className="refresh-btn" onClick={fetchData}>
+                    重试
+                  </button>
+                </div>
+              )}
+              {account && (
+                <>
+                  <AccountCard account={account} />
+                  <PositionsTable positions={positions} />
+                  <SignalsPanel signals={signals} />
+                </>
+              )}
+            </main>
+          </>
+        );
+      }
+
+      // 渲染
+      const root = ReactDOM.createRoot(document.getElementById("root"));
+      root.render(<App />);
+    </script>
+  </body>
+</html>

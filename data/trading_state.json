@@ -1,0 +1,76 @@
+{
+  "account": {
+    "equity": 999684.16,
+    "cash": 1048599.73,
+    "buying_power": 3916306.07,
+    "portfolio_value": 999684.16
+  },
+  "positions": [
+    {
+      "symbol": "AAPL",
+      "side": "long",
+      "qty": "48",
+      "avg_entry_price": 262.701458,
+      "current_price": 262.36,
+      "unrealized_pl": -16.39,
+      "unrealized_plpc": -0.0012997961088593
+    },
+    {
+      "symbol": "AVGO",
+      "side": "short",
+      "qty": "-36",
+      "avg_entry_price": 344.1025,
+      "current_price": 343.77,
+      "unrealized_pl": 11.97,
+      "unrealized_plpc": 0.0009662818491583
+    },
+    {
+      "symbol": "INTC",
+      "side": "short",
+      "qty": "-322",
+      "avg_entry_price": 39.33,
+      "current_price": 40.04,
+      "unrealized_pl": -228.62,
+      "unrealized_plpc": -0.0180523773201119
+    },
+    {
+      "symbol": "META",
+      "side": "short",
+      "qty": "-15",
+      "avg_entry_price": 657.53,
+      "current_price": 660.62,
+      "unrealized_pl": -46.35,
+      "unrealized_plpc": -0.0046994053503262
+    },
+    {
+      "symbol": "MU",
+      "side": "short",
+      "qty": "-40",
+      "avg_entry_price": 331.02,
+      "current_price": 343.43,
+      "unrealized_pl": -496.4,
+      "unrealized_plpc": -0.0374901818621231
+    },
+    {
+      "symbol": "ORCL",
+      "side": "short",
+      "qty": "-65",
+      "avg_entry_price": 193.63,
+      "current_price": 193.75,
+      "unrealized_pl": -7.8,
+      "unrealized_plpc": -0.0006197386768579
+    }
+  ],
+  "signals": {
+    "long": [],
+    "short": []
+  },
+  "orders": [],
+  "status": {
+    "last_update": "2026-01-07T02:39:59.208615-05:00",
+    "is_market_open": false,
+    "l1_safe": false,
+    "l1_prob": 0.0,
+    "is_running": true
+  }
+}

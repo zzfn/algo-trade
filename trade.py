@@ -14,6 +14,9 @@ from models.engine import StrategyEngine
 from models.constants import TOP_N_TRADES, SIGNAL_THRESHOLD, L1_RISK_FACTOR
 from models.dynamic_params import get_dynamic_params
 from utils.logger import setup_logger
+import json
+from pathlib import Path
+import redis
 
 # 初始化日志
 logger = setup_logger("trade")
@@ -28,9 +31,27 @@ class TradingBot:
         self.trading_client = TradingClient(self.api_key, self.secret_key, paper=True)
         self.engine = StrategyEngine()
         self.ny_tz = pytz.timezone("America/New_York")
-        # 使用统一配置常量
+        #使用统一配置常量
 
         self.TOP_N_TRADES = TOP_N_TRADES
+        
+        # 初始化 Redis (用于 Dashboard 状态共享)
+        self.redis_client = None
+        self.state_file = Path("data/trading_state.json")
+        try:
+            redis_host = os.getenv("REDIS_HOST", "localhost")
+            redis_port = int(os.getenv("REDIS_PORT", "6379"))
+            self.redis_client = redis.Redis(
+                host=redis_host,
+                port=redis_port,
+                db=0,
+                decode_responses=True,
+                socket_connect_timeout=2
+            )
+            self.redis_client.ping()
+            logger.info(f"✅ Redis 已连接 ({redis_host}:{redis_port})")
+        except Exception as e:
+            logger.warning(f"⚠️ Redis 连接失败: {e}, Dashboard 将使用文件备份")
         
     def get_account_info(self):
         return self.trading_client.get_account()
@@ -72,6 +93,23 @@ class TradingBot:
                 if next_close:
                     logger.info(f"   下次收盘: {next_close.strftime('%Y-%m-%d %H:%M:%S')} ET")
                 logger.info("   跳过本轮交易检查")
+                
+                # 即使市场关闭，也发布一次状态（显示账户信息）
+                try:
+                    account = self.get_account_info()
+                    positions = self.get_positions()
+                    self.publish_state(
+                        account=account,
+                        positions=positions,
+                        long_signals=pd.DataFrame(),  # 空信号
+                        short_signals=pd.DataFrame(),
+                        l1_safe=False,
+                        l1_prob=0.0,
+                        is_market_open=False
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ 市场关闭时状态发布失败: {e}")
+                
                 return next_open.replace(tzinfo=None)  # 返回下次开盘时间
             else:
                 logger.info(f"✅ 市场开放中 (收盘时间: {clock.next_close.astimezone(self.ny_tz).strftime('%H:%M:%S')} ET)")
@@ -195,6 +233,17 @@ class TradingBot:
                 executed_shorts += 1
         if executed_shorts > 0:
             logger.info(f"📊 本轮空头交易: 成功执行 {executed_shorts} 笔")
+        
+        # 7. 发布状态到 Dashboard
+        self.publish_state(
+            account=account,
+            positions=positions,
+            long_signals=long_signals,
+            short_signals=short_signals,
+            l1_safe=l1_safe,
+            l1_prob=l1_prob,
+            is_market_open=True
+        )
 
     def manage_positions(self, l3_signals, l2_ranked):
         """
@@ -361,6 +410,63 @@ class TradingBot:
         except Exception as e:
             logger.error(f"❌ 下单失败: {e}")
             return False
+    
+    def publish_state(self, account, positions, long_signals, short_signals, l1_safe, l1_prob, is_market_open):
+        """发布交易状态到 Dashboard (Redis + 文件备份)"""
+        try:
+            # 构建状态数据
+            state = {
+                "account": {
+                    "equity": float(account.equity),
+                    "cash": float(account.cash),
+                    "buying_power": float(account.buying_power),
+                    "portfolio_value": float(account.portfolio_value) if hasattr(account, 'portfolio_value') else float(account.equity),
+                },
+                "positions": [
+                    {
+                        "symbol": p.symbol,
+                        "side": p.side,
+                        "qty": p.qty,
+                        "avg_entry_price": float(p.avg_entry_price),
+                        "current_price": float(p.current_price),
+                        "unrealized_pl": float(p.unrealized_pl),
+                        "unrealized_plpc": float(p.unrealized_plpc),
+                    }
+                    for p in positions
+                ],
+                "signals": {
+                    "long": long_signals.to_dict('records') if not long_signals.empty else [],
+                    "short": short_signals.to_dict('records') if not short_signals.empty else [],
+                },
+                "orders": [],  # 可以扩展获取最近订单
+                "status": {
+                    "last_update": datetime.now(self.ny_tz).isoformat(),
+                    "is_market_open": is_market_open,
+                    "l1_safe": l1_safe,
+                    "l1_prob": l1_prob,
+                    "is_running": True,
+                }
+            }
+            
+            # 序列化为 JSON
+            state_json = json.dumps(state, default=str)
+            
+            # 写入 Redis
+            if self.redis_client:
+                try:
+                    self.redis_client.set("trading:state", state_json, ex=300)  # 5分钟过期
+                    logger.debug("✅ 状态已发布到 Redis")
+                except Exception as e:
+                    logger.warning(f"⚠️ Redis 写入失败: {e}")
+            
+            # 备份到文件
+            self.state_file.parent.mkdir(exist_ok=True)
+            with open(self.state_file, 'w', encoding='utf-8') as f:
+                json.dump(state, f, indent=2, default=str)
+            logger.debug("✅ 状态已备份到文件")
+            
+        except Exception as e:
+            logger.error(f"❌ 状态发布失败: {e}")
 
 def main():
     parser = argparse.ArgumentParser()

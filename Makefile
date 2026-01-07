@@ -120,3 +120,12 @@ generate-meta-data:
 
 train-l5:
 	PYTHONPATH=. uv run python scripts/train_l5.py
+
+# Web Dashboard
+.PHONY: dashboard
+
+# 启动 Dashboard
+dashboard:
+	@echo "🚀 启动 Dashboard 服务器..."
+	@echo "访问: http://localhost:8000"
+	PYTHONPATH=. uv run uvicorn web.server:app --host 0.0.0.0 --port 8000 --reload
