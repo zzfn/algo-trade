@@ -201,9 +201,96 @@ async def get_l2_debug():
 
 
 @app.get("/api/models/l3")
-async def get_l3_debug():
-    """获取L3趋势确认详细信息"""
+async def get_l3_debug(symbols: str = None):
+    """获取L3趋势确认详细信息
+    
+    Args:
+        symbols: 可选，逗号分隔的股票代码列表，如 "AAPL,TSLA,NVDA"
+    """
+    if strategy_engine is None:
+        raise HTTPException(status_code=503, detail="预测引擎未初始化")
+    
     try:
+        # 如果传入了自定义股票列表，直接进行L3预测
+        if symbols:
+            from datetime import timedelta
+            from alpaca.data.timeframe import TimeFrame
+            from models.constants import get_feature_columns, L3_LOOKBACK_DAYS
+            
+            # 解析股票列表
+            symbol_list = [s.strip().upper() for s in symbols.split(',') if s.strip()]
+            if not symbol_list:
+                raise HTTPException(status_code=400, detail="股票列表不能为空")
+            
+            # 获取当前时间（纽约时区）
+            ny_tz = pytz.timezone("America/New_York")
+            target_dt = datetime.now(ny_tz).replace(tzinfo=None)
+            
+            # 获取L3所需的1分钟K线数据
+            l3_start = target_dt - timedelta(days=L3_LOOKBACK_DAYS)
+            df_l3_raw = strategy_engine.provider.fetch_bars(
+                symbol_list, 
+                TimeFrame.Minute, 
+                l3_start, 
+                target_dt + timedelta(days=1), 
+                use_redis=True
+            )
+            
+            if df_l3_raw.empty:
+                return {
+                    "timestamp": target_dt.isoformat(),
+                    "signals": [],
+                    "signal_threshold": float(SIGNAL_THRESHOLD),
+                    "custom_symbols": symbol_list
+                }
+            
+            # 构建特征
+            df_l3_feats = strategy_engine.l2_builder.add_all_features(df_l3_raw, is_training=False)
+            l3_valid = df_l3_feats[df_l3_feats['timestamp'] <= target_dt]
+            
+            if l3_valid.empty:
+                return {
+                    "timestamp": target_dt.isoformat(),
+                    "signals": [],
+                    "signal_threshold": float(SIGNAL_THRESHOLD),
+                    "custom_symbols": symbol_list
+                }
+            
+            # 获取最新时间点的数据
+            last_ts = l3_valid['timestamp'].max()
+            l3_latest = l3_valid[l3_valid['timestamp'] == last_ts].copy()
+            
+            # L3模型预测
+            l3_features = get_feature_columns(l3_latest)
+            probs = strategy_engine.l3_model.predict_proba(l3_latest[l3_features])
+            l3_latest['long_p'] = probs[:, 1]
+            l3_latest['short_p'] = probs[:, 2]
+            
+            # 转换为响应格式
+            signals = []
+            for _, row in l3_latest.iterrows():
+                shakeout_desc = "None"
+                if row.get('shakeout_bull') == 1:
+                    shakeout_desc = "Bullish Shakeout"
+                elif row.get('shakeout_bear') == 1:
+                    shakeout_desc = "Bearish Trap"
+                
+                signals.append({
+                    "symbol": str(row['symbol']),
+                    "close": float(row['close']),
+                    "long_p": float(row['long_p']),
+                    "short_p": float(row['short_p']),
+                    "shakeout": str(shakeout_desc),
+                })
+            
+            return {
+                "timestamp": last_ts.isoformat(),
+                "signals": signals,
+                "signal_threshold": float(SIGNAL_THRESHOLD),
+                "custom_symbols": symbol_list
+            }
+        
+        # 否则使用缓存的L2预测结果
         cache = getattr(state_manager, '_prediction_cache', None)
         if not cache:
             raise HTTPException(status_code=404, detail="请先运行预测 /api/predict")
@@ -237,6 +324,9 @@ async def get_l3_debug():
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        print(f"❌ L3预测失败: {e}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 

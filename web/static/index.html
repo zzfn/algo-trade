@@ -439,6 +439,41 @@
         font-size: 0.875rem;
         margin-bottom: 1rem;
       }
+
+      .input-section {
+        display: flex;
+        gap: 0.75rem;
+        margin-bottom: 1.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .input-section input {
+        flex: 1;
+        min-width: 300px;
+        padding: 0.75rem 1rem;
+        background: rgba(99, 102, 241, 0.05);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-primary);
+        font-size: 0.9rem;
+        transition: all 0.2s;
+      }
+
+      .input-section input:focus {
+        outline: none;
+        border-color: var(--accent-blue);
+        background: rgba(99, 102, 241, 0.1);
+      }
+
+      .input-section input::placeholder {
+        color: var(--text-secondary);
+      }
+
+      .btn-group {
+        display: flex;
+        gap: 0.5rem;
+      }
     </style>
   </head>
   <body>
@@ -477,8 +512,12 @@
           const res = await fetch("/api/models/l2");
           return res.json();
         },
-        async getL3Debug() {
-          const res = await fetch("/api/models/l3");
+        async getL3Debug(symbols = null) {
+          let url = "/api/models/l3";
+          if (symbols) {
+            url += `?symbols=${encodeURIComponent(symbols)}`;
+          }
+          const res = await fetch(url);
           return res.json();
         },
         async getL4Debug() {
@@ -1046,20 +1085,37 @@
       function L3DebugTab() {
         const [data, setData] = useState(null);
         const [loading, setLoading] = useState(false);
+        const [customSymbols, setCustomSymbols] = useState("");
+        const [isCustomMode, setIsCustomMode] = useState(false);
 
         useEffect(() => {
           loadData();
         }, []);
 
-        const loadData = async () => {
+        const loadData = async (symbols = null) => {
           setLoading(true);
           try {
-            const result = await api.getL3Debug();
+            const result = await api.getL3Debug(symbols);
             setData(result);
+            setIsCustomMode(!!symbols);
           } catch (err) {
             console.error("Failed to load L3 data:", err);
           }
           setLoading(false);
+        };
+
+        const handlePredict = () => {
+          if (!customSymbols.trim()) {
+            alert("请输入股票代码");
+            return;
+          }
+          loadData(customSymbols.trim());
+        };
+
+        const handleReset = () => {
+          setCustomSymbols("");
+          setIsCustomMode(false);
+          loadData();
         };
 
         if (loading) {
@@ -1070,12 +1126,35 @@
           return (
             <div className="card">
               <h2>L3 趋势确认调试</h2>
+
+              <div className="input-section">
+                <input
+                  type="text"
+                  placeholder="输入股票代码，用逗号分隔，如: AAPL,TSLA,NVDA"
+                  value={customSymbols}
+                  onChange={(e) => setCustomSymbols(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === "Enter") handlePredict();
+                  }}
+                />
+                <div className="btn-group">
+                  <button className="btn" onClick={handlePredict}>
+                    🔍 预测
+                  </button>
+                  <button className="btn btn-secondary" onClick={handleReset}>
+                    🔄 重置
+                  </button>
+                </div>
+              </div>
+
               <div className="empty-state">
-                请先运行预测以查看L3详情
+                {isCustomMode
+                  ? "未找到指定股票的L3信号数据，请检查股票代码是否正确"
+                  : "请先运行预测以查看L3详情，或在上方输入框中输入股票代码"}
                 <br />
                 <button
                   className="btn"
-                  onClick={loadData}
+                  onClick={() => loadData()}
                   style={{ marginTop: "1rem" }}
                 >
                   尝试加载
@@ -1088,10 +1167,38 @@
         return (
           <div className="card">
             <h2>L3 趋势确认调试</h2>
+
+            <div className="input-section">
+              <input
+                type="text"
+                placeholder="输入股票代码，用逗号分隔，如: AAPL,TSLA,NVDA"
+                value={customSymbols}
+                onChange={(e) => setCustomSymbols(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === "Enter") handlePredict();
+                }}
+              />
+              <div className="btn-group">
+                <button className="btn" onClick={handlePredict}>
+                  🔍 预测
+                </button>
+                <button className="btn btn-secondary" onClick={handleReset}>
+                  🔄 重置
+                </button>
+              </div>
+            </div>
+
             {data.timestamp && (
               <div className="timestamp">
                 📅 数据时间: {new Date(data.timestamp).toLocaleString("zh-CN")}{" "}
                 | 信号阈值: {(data.signal_threshold * 100).toFixed(0)}%
+                {isCustomMode && data.custom_symbols && (
+                  <span
+                    style={{ marginLeft: "1rem", color: "var(--accent-blue)" }}
+                  >
+                    | 🎯 自定义股票: {data.custom_symbols.join(", ")}
+                  </span>
+                )}
               </div>
             )}
 
@@ -1147,6 +1254,15 @@
                 当置信度超过阈值（{(data.signal_threshold * 100).toFixed(0)}
                 %）时，认为是高置信度信号。
                 洗盘检测用于识别潜在的假突破和市场陷阱。
+                {isCustomMode && (
+                  <>
+                    <br />
+                    <br />
+                    <strong>🎯 当前为自定义股票模式</strong>
+                    ：您正在查看自定义输入股票的L3预测结果。
+                    点击"重置"按钮可返回查看L2筛选的股票。
+                  </>
+                )}
               </p>
             </div>
           </div>
