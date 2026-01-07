@@ -35,6 +35,7 @@
         --accent-purple: #a855f7;
         --profit-green: #10b981;
         --loss-red: #ef4444;
+        --warning-orange: #f59e0b;
       }
 
       body {
@@ -109,10 +110,10 @@
       }
       .status-badge.unsafe {
         background: rgba(245, 158, 11, 0.1);
-        color: #f59e0b;
+        color: var(--warning-orange);
       }
 
-      .refresh-btn {
+      .btn {
         background: var(--accent-blue);
         color: white;
         border: none;
@@ -121,17 +122,65 @@
         font-weight: 500;
         cursor: pointer;
         transition: all 0.2s;
+        font-size: 0.9rem;
       }
 
-      .refresh-btn:hover {
+      .btn:hover {
         background: var(--accent-purple);
         transform: translateY(-1px);
+      }
+
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .btn.btn-secondary {
+        background: rgba(99, 102, 241, 0.2);
+        color: var(--accent-blue);
+      }
+
+      .btn.btn-secondary:hover {
+        background: rgba(168, 85, 247, 0.2);
+        color: var(--accent-purple);
       }
 
       .container {
         max-width: 1400px;
         margin: 0 auto;
         padding: 2rem;
+      }
+
+      /* 标签页导航 */
+      .tabs {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 2rem;
+        border-bottom: 2px solid var(--border-color);
+        overflow-x: auto;
+      }
+
+      .tab {
+        padding: 1rem 1.5rem;
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.2s;
+        font-weight: 500;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        white-space: nowrap;
+      }
+
+      .tab:hover {
+        color: var(--accent-blue);
+      }
+
+      .tab.active {
+        color: var(--accent-blue);
+        border-bottom-color: var(--accent-blue);
       }
 
       .card {
@@ -147,6 +196,12 @@
       .card h2 {
         font-size: 1.25rem;
         margin-bottom: 1.5rem;
+      }
+
+      .card h3 {
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
+        color: var(--accent-blue);
       }
 
       .account-grid {
@@ -306,6 +361,84 @@
       .error {
         color: var(--loss-red);
       }
+
+      .info-box {
+        background: rgba(99, 102, 241, 0.05);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+      }
+
+      .info-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .info-row:last-child {
+        border-bottom: none;
+      }
+
+      .info-label {
+        color: var(--text-secondary);
+      }
+
+      .info-value {
+        font-weight: 600;
+      }
+
+      .prediction-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+      }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .metric-card {
+        background: rgba(99, 102, 241, 0.05);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 1rem;
+        text-align: center;
+      }
+
+      .metric-label {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .metric-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+      }
+
+      .metric-value.green {
+        color: var(--profit-green);
+      }
+
+      .metric-value.red {
+        color: var(--loss-red);
+      }
+
+      .metric-value.orange {
+        color: var(--warning-orange);
+      }
+
+      .timestamp {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        margin-bottom: 1rem;
+      }
     </style>
   </head>
   <body>
@@ -332,9 +465,29 @@
           const res = await fetch("/api/status");
           return res.json();
         },
+        async runPrediction() {
+          const res = await fetch("/api/predict");
+          return res.json();
+        },
+        async getL1Debug() {
+          const res = await fetch("/api/models/l1");
+          return res.json();
+        },
+        async getL2Debug() {
+          const res = await fetch("/api/models/l2");
+          return res.json();
+        },
+        async getL3Debug() {
+          const res = await fetch("/api/models/l3");
+          return res.json();
+        },
+        async getL4Debug() {
+          const res = await fetch("/api/models/l4");
+          return res.json();
+        },
       };
 
-      // 组件
+      // Header组件
       function Header({ status, onRefresh }) {
         const isMarketOpen = status?.is_market_open || false;
         const l1Safe = status?.l1_safe || false;
@@ -363,12 +516,23 @@
                     更新: {new Date(lastUpdate).toLocaleTimeString("zh-CN")}
                   </div>
                 )}
-                <button className="refresh-btn" onClick={onRefresh}>
+                <button className="btn" onClick={onRefresh}>
                   🔄 刷新
                 </button>
               </div>
             </div>
           </header>
+        );
+      }
+
+      // 仪表盘标签页
+      function DashboardTab({ account, positions, signals }) {
+        return (
+          <>
+            <AccountCard account={account} />
+            <PositionsTable positions={positions} />
+            <SignalsPanel signals={signals} />
+          </>
         );
       }
 
@@ -518,14 +682,653 @@
         );
       }
 
+      // 预测中心标签页
+      function PredictionTab({ onRunPrediction, predicting }) {
+        const [predictionData, setPredictionData] = useState(null);
+        const [l1Data, setL1Data] = useState(null);
+        const [l4Data, setL4Data] = useState(null);
+
+        const runPrediction = async () => {
+          try {
+            const result = await onRunPrediction();
+            setPredictionData(result);
+
+            // 获取L1和L4详情
+            const l1 = await api.getL1Debug();
+            const l4 = await api.getL4Debug();
+            setL1Data(l1);
+            setL4Data(l4);
+          } catch (err) {
+            console.error("Prediction failed:", err);
+          }
+        };
+
+        return (
+          <div className="card">
+            <div className="prediction-header">
+              <h2>🔮 预测中心</h2>
+              <button
+                className="btn"
+                onClick={runPrediction}
+                disabled={predicting}
+              >
+                {predicting ? "⏳ 预测中..." : "▶️ 运行预测"}
+              </button>
+            </div>
+
+            {!predictionData && (
+              <div className="empty-state">点击"运行预测"开始分析</div>
+            )}
+
+            {predictionData && (
+              <>
+                <div className="timestamp">
+                  📅 预测时间:{" "}
+                  {new Date(predictionData.timestamp).toLocaleString("zh-CN")}
+                </div>
+
+                <h3>L1 市场择时</h3>
+                <div className="metric-grid">
+                  <div className="metric-card">
+                    <div className="metric-label">市场状态</div>
+                    <div
+                      className={`metric-value ${
+                        predictionData.l1_safe ? "green" : "orange"
+                      }`}
+                    >
+                      {predictionData.l1_safe ? "✅ 安全" : "⚠️ 谨慎"}
+                    </div>
+                  </div>
+                  <div className="metric-card">
+                    <div className="metric-label">置信度</div>
+                    <div className="metric-value">
+                      {(predictionData.l1_prob * 100).toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+
+                {l4Data && (
+                  <>
+                    <h3>L4 交易建议</h3>
+
+                    {l4Data.long_recommendations &&
+                      l4Data.long_recommendations.length > 0 && (
+                        <>
+                          <h4
+                            style={{
+                              color: "var(--profit-green)",
+                              marginTop: "1rem",
+                            }}
+                          >
+                            📈 做多建议 (Top{" "}
+                            {l4Data.long_recommendations.length})
+                          </h4>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>标的</th>
+                                <th>置信度</th>
+                                <th>预期收益</th>
+                                <th>仓位</th>
+                                <th>止盈</th>
+                                <th>止损</th>
+                                <th>盈亏比</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {l4Data.long_recommendations.map((rec, idx) => (
+                                <tr key={idx}>
+                                  <td className="symbol">{rec.symbol}</td>
+                                  <td className="profit">
+                                    {(rec.confidence * 100).toFixed(1)}%
+                                  </td>
+                                  <td className="profit">
+                                    +{(rec.predicted_return * 100).toFixed(2)}%
+                                  </td>
+                                  <td>{(rec.allocation * 100).toFixed(0)}%</td>
+                                  <td className="profit">
+                                    ${rec.take_profit.toFixed(2)} (
+                                    {(rec.tp_pct * 100).toFixed(1)}%)
+                                  </td>
+                                  <td className="loss">
+                                    ${rec.stop_loss.toFixed(2)} (
+                                    {(rec.sl_pct * 100).toFixed(1)}%)
+                                  </td>
+                                  <td>{rec.risk_reward.toFixed(2)}:1</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </>
+                      )}
+
+                    {l4Data.short_recommendations &&
+                      l4Data.short_recommendations.length > 0 && (
+                        <>
+                          <h4
+                            style={{
+                              color: "var(--loss-red)",
+                              marginTop: "1.5rem",
+                            }}
+                          >
+                            📉 做空建议 (Top{" "}
+                            {l4Data.short_recommendations.length})
+                          </h4>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>标的</th>
+                                <th>置信度</th>
+                                <th>预期跌幅</th>
+                                <th>仓位</th>
+                                <th>止盈</th>
+                                <th>止损</th>
+                                <th>盈亏比</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {l4Data.short_recommendations.map((rec, idx) => (
+                                <tr key={idx}>
+                                  <td className="symbol">{rec.symbol}</td>
+                                  <td className="loss">
+                                    {(rec.confidence * 100).toFixed(1)}%
+                                  </td>
+                                  <td className="loss">
+                                    {(rec.predicted_return * 100).toFixed(2)}%
+                                  </td>
+                                  <td>{(rec.allocation * 100).toFixed(0)}%</td>
+                                  <td className="profit">
+                                    ${rec.take_profit.toFixed(2)} (
+                                    {(rec.tp_pct * 100).toFixed(1)}%)
+                                  </td>
+                                  <td className="loss">
+                                    ${rec.stop_loss.toFixed(2)} (
+                                    {(rec.sl_pct * 100).toFixed(1)}%)
+                                  </td>
+                                  <td>{rec.risk_reward.toFixed(2)}:1</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </>
+                      )}
+
+                    {(!l4Data.long_recommendations ||
+                      l4Data.long_recommendations.length === 0) &&
+                      (!l4Data.short_recommendations ||
+                        l4Data.short_recommendations.length === 0) && (
+                        <div className="empty-state">
+                          当前无高置信度交易信号
+                        </div>
+                      )}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        );
+      }
+
+      // L1调试标签页
+      function L1DebugTab() {
+        const [data, setData] = useState(null);
+        const [loading, setLoading] = useState(false);
+
+        useEffect(() => {
+          loadData();
+        }, []);
+
+        const loadData = async () => {
+          setLoading(true);
+          try {
+            const result = await api.getL1Debug();
+            setData(result);
+          } catch (err) {
+            console.error("Failed to load L1 data:", err);
+          }
+          setLoading(false);
+        };
+
+        if (loading) {
+          return <div className="loading">⏳ 加载中...</div>;
+        }
+
+        if (!data) {
+          return (
+            <div className="card">
+              <h2>L1 市场择时调试</h2>
+              <div className="empty-state">
+                请先运行预测以查看L1详情
+                <br />
+                <button
+                  className="btn"
+                  onClick={loadData}
+                  style={{ marginTop: "1rem" }}
+                >
+                  尝试加载
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="card">
+            <h2>L1 市场择时调试</h2>
+
+            <div className="metric-grid">
+              <div className="metric-card">
+                <div className="metric-label">市场环境</div>
+                <div
+                  className={`metric-value ${data.safe ? "green" : "orange"}`}
+                >
+                  {data.safe ? "✅ 安全" : "⚠️ 不安全"}
+                </div>
+              </div>
+              <div className="metric-card">
+                <div className="metric-label">置信度</div>
+                <div className="metric-value">
+                  {(data.probability * 100).toFixed(2)}%
+                </div>
+              </div>
+              <div className="metric-card">
+                <div className="metric-label">阈值</div>
+                <div className="metric-value">
+                  {(data.threshold * 100).toFixed(0)}%
+                </div>
+              </div>
+            </div>
+
+            <div className="info-box" style={{ marginTop: "1.5rem" }}>
+              <h3>说明</h3>
+              <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                L1层使用宏观市场指标（SPY, VIXY,
+                TLT等）判断市场环境是否适合交易。
+                当置信度高于阈值时，判定市场安全，允许做多操作。
+              </p>
+            </div>
+          </div>
+        );
+      }
+
+      // L2调试标签页
+      function L2DebugTab() {
+        const [data, setData] = useState(null);
+        const [loading, setLoading] = useState(false);
+
+        useEffect(() => {
+          loadData();
+        }, []);
+
+        const loadData = async () => {
+          setLoading(true);
+          try {
+            const result = await api.getL2Debug();
+            setData(result);
+          } catch (err) {
+            console.error("Failed to load L2 data:", err);
+          }
+          setLoading(false);
+        };
+
+        if (loading) {
+          return <div className="loading">⏳ 加载中...</div>;
+        }
+
+        if (!data || !data.stocks || data.stocks.length === 0) {
+          return (
+            <div className="card">
+              <h2>L2 标的筛选调试</h2>
+              <div className="empty-state">
+                请先运行预测以查看L2详情
+                <br />
+                <button
+                  className="btn"
+                  onClick={loadData}
+                  style={{ marginTop: "1rem" }}
+                >
+                  尝试加载
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="card">
+            <h2>L2 标的筛选调试</h2>
+            {data.timestamp && (
+              <div className="timestamp">
+                📅 数据时间: {new Date(data.timestamp).toLocaleString("zh-CN")}
+              </div>
+            )}
+
+            <table>
+              <thead>
+                <tr>
+                  <th>排名</th>
+                  <th>标的</th>
+                  <th>价格</th>
+                  <th>相对强度得分</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.stocks.map((stock, idx) => (
+                  <tr key={idx}>
+                    <td>{stock.rank}</td>
+                    <td className="symbol">{stock.symbol}</td>
+                    <td>${stock.close.toFixed(2)}</td>
+                    <td>
+                      <span
+                        className={stock.rank_score > 0 ? "profit" : "loss"}
+                      >
+                        {stock.rank_score > 0 ? "📈" : "📉"}{" "}
+                        {stock.rank_score.toFixed(4)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="info-box" style={{ marginTop: "1.5rem" }}>
+              <h3>说明</h3>
+              <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                L2层使用15分钟K线数据对标的进行相对强度排名。
+                排名靠前的标的具有更强的动量，更有可能产生交易机会。
+              </p>
+            </div>
+          </div>
+        );
+      }
+
+      // L3调试标签页
+      function L3DebugTab() {
+        const [data, setData] = useState(null);
+        const [loading, setLoading] = useState(false);
+
+        useEffect(() => {
+          loadData();
+        }, []);
+
+        const loadData = async () => {
+          setLoading(true);
+          try {
+            const result = await api.getL3Debug();
+            setData(result);
+          } catch (err) {
+            console.error("Failed to load L3 data:", err);
+          }
+          setLoading(false);
+        };
+
+        if (loading) {
+          return <div className="loading">⏳ 加载中...</div>;
+        }
+
+        if (!data || !data.signals || data.signals.length === 0) {
+          return (
+            <div className="card">
+              <h2>L3 趋势确认调试</h2>
+              <div className="empty-state">
+                请先运行预测以查看L3详情
+                <br />
+                <button
+                  className="btn"
+                  onClick={loadData}
+                  style={{ marginTop: "1rem" }}
+                >
+                  尝试加载
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="card">
+            <h2>L3 趋势确认调试</h2>
+            {data.timestamp && (
+              <div className="timestamp">
+                📅 数据时间: {new Date(data.timestamp).toLocaleString("zh-CN")}{" "}
+                | 信号阈值: {(data.signal_threshold * 100).toFixed(0)}%
+              </div>
+            )}
+
+            <table>
+              <thead>
+                <tr>
+                  <th>标的</th>
+                  <th>价格</th>
+                  <th>做多置信度</th>
+                  <th>做空置信度</th>
+                  <th>洗盘检测</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.signals.map((signal, idx) => (
+                  <tr key={idx}>
+                    <td className="symbol">{signal.symbol}</td>
+                    <td>${signal.close.toFixed(2)}</td>
+                    <td>
+                      <span
+                        className={
+                          signal.long_p > data.signal_threshold ? "profit" : ""
+                        }
+                      >
+                        {(signal.long_p * 100).toFixed(2)}%
+                        {signal.long_p > data.signal_threshold && " ✅"}
+                      </span>
+                    </td>
+                    <td>
+                      <span
+                        className={
+                          signal.short_p > data.signal_threshold ? "loss" : ""
+                        }
+                      >
+                        {(signal.short_p * 100).toFixed(2)}%
+                        {signal.short_p > data.signal_threshold && " ✅"}
+                      </span>
+                    </td>
+                    <td>
+                      {signal.shakeout === "Bullish Shakeout" && "🐮 看涨洗盘"}
+                      {signal.shakeout === "Bearish Trap" && "🐻 看跌陷阱"}
+                      {signal.shakeout === "None" && "-"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <div className="info-box" style={{ marginTop: "1.5rem" }}>
+              <h3>说明</h3>
+              <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                L3层使用1分钟K线数据进行趋势确认，预测做多和做空的置信度。
+                当置信度超过阈值（{(data.signal_threshold * 100).toFixed(0)}
+                %）时，认为是高置信度信号。
+                洗盘检测用于识别潜在的假突破和市场陷阱。
+              </p>
+            </div>
+          </div>
+        );
+      }
+
+      // L4调试标签页
+      function L4DebugTab() {
+        const [data, setData] = useState(null);
+        const [loading, setLoading] = useState(false);
+
+        useEffect(() => {
+          loadData();
+        }, []);
+
+        const loadData = async () => {
+          setLoading(true);
+          try {
+            const result = await api.getL4Debug();
+            setData(result);
+          } catch (err) {
+            console.error("Failed to load L4 data:", err);
+          }
+          setLoading(false);
+        };
+
+        if (loading) {
+          return <div className="loading">⏳ 加载中...</div>;
+        }
+
+        if (!data) {
+          return (
+            <div className="card">
+              <h2>L4 风控建议调试</h2>
+              <div className="empty-state">
+                请先运行预测以查看L4详情
+                <br />
+                <button
+                  className="btn"
+                  onClick={loadData}
+                  style={{ marginTop: "1rem" }}
+                >
+                  尝试加载
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        const hasLong =
+          data.long_recommendations && data.long_recommendations.length > 0;
+        const hasShort =
+          data.short_recommendations && data.short_recommendations.length > 0;
+
+        return (
+          <div className="card">
+            <h2>L4 风控建议调试</h2>
+            <div className="timestamp">Top N 交易数量: {data.top_n}</div>
+
+            {hasLong && (
+              <>
+                <h3 style={{ color: "var(--profit-green)" }}>
+                  📈 做多建议详情
+                </h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>标的</th>
+                      <th>置信度</th>
+                      <th>预期收益</th>
+                      <th>建议仓位</th>
+                      <th>当前价格</th>
+                      <th>止盈价格</th>
+                      <th>止损价格</th>
+                      <th>盈亏比</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.long_recommendations.map((rec, idx) => (
+                      <tr key={idx}>
+                        <td className="symbol">{rec.symbol}</td>
+                        <td className="profit">
+                          {(rec.confidence * 100).toFixed(1)}%
+                        </td>
+                        <td className="profit">
+                          +{(rec.predicted_return * 100).toFixed(2)}%
+                        </td>
+                        <td>{(rec.allocation * 100).toFixed(1)}%</td>
+                        <td>${rec.current_price.toFixed(2)}</td>
+                        <td className="profit">
+                          ${rec.take_profit.toFixed(2)}
+                          <br />
+                          <small>({(rec.tp_pct * 100).toFixed(1)}%)</small>
+                        </td>
+                        <td className="loss">
+                          ${rec.stop_loss.toFixed(2)}
+                          <br />
+                          <small>({(rec.sl_pct * 100).toFixed(1)}%)</small>
+                        </td>
+                        <td>{rec.risk_reward.toFixed(2)}:1</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+
+            {hasShort && (
+              <>
+                <h3 style={{ color: "var(--loss-red)", marginTop: "1.5rem" }}>
+                  📉 做空建议详情
+                </h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>标的</th>
+                      <th>置信度</th>
+                      <th>预期跌幅</th>
+                      <th>建议仓位</th>
+                      <th>当前价格</th>
+                      <th>止盈价格</th>
+                      <th>止损价格</th>
+                      <th>盈亏比</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.short_recommendations.map((rec, idx) => (
+                      <tr key={idx}>
+                        <td className="symbol">{rec.symbol}</td>
+                        <td className="loss">
+                          {(rec.confidence * 100).toFixed(1)}%
+                        </td>
+                        <td className="loss">
+                          {(rec.predicted_return * 100).toFixed(2)}%
+                        </td>
+                        <td>{(rec.allocation * 100).toFixed(1)}%</td>
+                        <td>${rec.current_price.toFixed(2)}</td>
+                        <td className="profit">
+                          ${rec.take_profit.toFixed(2)}
+                          <br />
+                          <small>({(rec.tp_pct * 100).toFixed(1)}%)</small>
+                        </td>
+                        <td className="loss">
+                          ${rec.stop_loss.toFixed(2)}
+                          <br />
+                          <small>({(rec.sl_pct * 100).toFixed(1)}%)</small>
+                        </td>
+                        <td>{rec.risk_reward.toFixed(2)}:1</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+
+            {!hasLong && !hasShort && (
+              <div className="empty-state">当前无高置信度交易建议</div>
+            )}
+
+            <div className="info-box" style={{ marginTop: "1.5rem" }}>
+              <h3>说明</h3>
+              <p style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                L4层结合L1-L3的信号，使用SMC（Smart Money
+                Concepts）规则计算止盈止损价位。
+                预期收益基于历史数据训练的模型预测，仓位分配根据预期收益和市场环境动态调整。
+                盈亏比是潜在收益与风险的比率，通常建议选择盈亏比 ≥ 2:1 的交易。
+              </p>
+            </div>
+          </div>
+        );
+      }
+
       // 主应用
       function App() {
+        const [activeTab, setActiveTab] = useState("dashboard");
         const [account, setAccount] = useState(null);
         const [positions, setPositions] = useState([]);
         const [signals, setSignals] = useState({ long: [], short: [] });
         const [status, setStatus] = useState(null);
         const [loading, setLoading] = useState(true);
         const [error, setError] = useState(null);
+        const [predicting, setPredicting] = useState(false);
 
         const fetchData = async () => {
           try {
@@ -552,35 +1355,87 @@
           }
         };
 
+        const runPrediction = async () => {
+          setPredicting(true);
+          try {
+            const result = await api.runPrediction();
+            return result;
+          } catch (err) {
+            setError("预测失败: " + err.message);
+            throw err;
+          } finally {
+            setPredicting(false);
+          }
+        };
+
         useEffect(() => {
           fetchData();
           const interval = setInterval(fetchData, 30000); // 30秒刷新
           return () => clearInterval(interval);
         }, []);
 
+        const tabs = [
+          { id: "dashboard", label: "📊 仪表盘", icon: "📊" },
+          { id: "prediction", label: "🔮 预测中心", icon: "🔮" },
+          { id: "l1", label: "L1 择时", icon: "📈" },
+          { id: "l2", label: "L2 筛选", icon: "🎯" },
+          { id: "l3", label: "L3 趋势", icon: "📉" },
+          { id: "l4", label: "L4 风控", icon: "🛡️" },
+        ];
+
         return (
           <>
             <Header status={status} onRefresh={fetchData} />
             <main className="container">
-              {loading && !account && (
-                <div className="loading">⏳ 加载中...</div>
-              )}
               {error && (
                 <div className="error">
-                  ⚠️ 数据加载失败: {error}
+                  ⚠️ {error}
                   <br />
-                  <button className="refresh-btn" onClick={fetchData}>
+                  <button
+                    className="btn"
+                    onClick={fetchData}
+                    style={{ marginTop: "1rem" }}
+                  >
                     重试
                   </button>
                 </div>
               )}
-              {account && (
-                <>
-                  <AccountCard account={account} />
-                  <PositionsTable positions={positions} />
-                  <SignalsPanel signals={signals} />
-                </>
+
+              <div className="tabs">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    className={`tab ${activeTab === tab.id ? "active" : ""}`}
+                    onClick={() => setActiveTab(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {loading && !account && activeTab === "dashboard" && (
+                <div className="loading">⏳ 加载中...</div>
               )}
+
+              {activeTab === "dashboard" && account && (
+                <DashboardTab
+                  account={account}
+                  positions={positions}
+                  signals={signals}
+                />
+              )}
+
+              {activeTab === "prediction" && (
+                <PredictionTab
+                  onRunPrediction={runPrediction}
+                  predicting={predicting}
+                />
+              )}
+
+              {activeTab === "l1" && <L1DebugTab />}
+              {activeTab === "l2" && <L2DebugTab />}
+              {activeTab === "l3" && <L3DebugTab />}
+              {activeTab === "l4" && <L4DebugTab />}
             </main>
           </>
         );
