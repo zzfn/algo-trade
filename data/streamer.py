@@ -42,10 +42,14 @@ class MarketDataStreamer:
         """处理接收到的 1分钟 K线数据"""
         try:
             # bar 是 alpaca.data.models.Bar 对象
+            import pytz
+            ny_tz = pytz.timezone('America/New_York')
+            
             symbol = bar.symbol
             timestamp = bar.timestamp # UTC Aware datetime
+            timestamp_et = timestamp.astimezone(ny_tz)
             
-            logger.info(f"📡 接收到 Bar: {symbol} @ {timestamp.strftime('%H:%M')} | Close: {bar.close}")
+            logger.info(f"📡 接收到 Bar: {symbol} @ {timestamp_et.strftime('%H:%M')} | Close: {bar.close}")
             
             # 转换为 DataFrame 格式以适配 RedisDataManager
             # 注意: RedisDataManager 会处理时区问题, 这里传入原始 UTC 时间戳即可

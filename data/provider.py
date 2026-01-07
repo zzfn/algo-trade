@@ -121,7 +121,8 @@ class DataProvider:
                         
                     show_end = end
                     if show_end.tzinfo is None:
-                        show_end = pytz.utc.localize(show_end).astimezone(ny_tz)
+                        # 修正: Naive Time 视为 NY Time
+                        show_end = ny_tz.localize(show_end)
                     else:
                         show_end = show_end.astimezone(ny_tz)
                         
@@ -169,13 +170,15 @@ class DataProvider:
                 
                 show_start_full = start
                 if show_start_full.tzinfo is None:
-                     show_start_full = pytz.utc.localize(show_start_full).astimezone(ny_tz)
+                     # 修正: 项目约定 Naive Time 为 NY Time
+                     show_start_full = ny_tz.localize(show_start_full)
                 else:
                      show_start_full = show_start_full.astimezone(ny_tz)
 
                 show_end_full = end
                 if show_end_full.tzinfo is None:
-                     show_end_full = pytz.utc.localize(show_end_full).astimezone(ny_tz)
+                     # 修正: 项目约定 Naive Time 为 NY Time
+                     show_end_full = ny_tz.localize(show_end_full)
                 else:
                      show_end_full = show_end_full.astimezone(ny_tz)
 
