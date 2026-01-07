@@ -22,6 +22,18 @@ class RedisDataManager:
             password=password, 
             decode_responses=True
         )
+
+    def reset_db(self):
+        """重置所有市场数据 Key"""
+        try:
+            keys = self.redis.keys("market_data:*")
+            if keys:
+                self.redis.delete(*keys)
+                print(f"🧹 已清理 {len(keys)} 个 Redis 市场数据 Key")
+            else:
+                print("🧹 Redis 已空，无需清理")
+        except Exception as e:
+            print(f"⚠️ Redis 清理失败: {e}")
         
     def get_key(self, symbol: str, timeframe: TimeFrame) -> str:
         """生成 Redis Key: market_data:{symbol}:{tf}"""

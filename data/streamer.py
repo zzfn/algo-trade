@@ -26,6 +26,9 @@ class MarketDataStreamer:
         # 初始化 Redis Manager
         self.redis_mgr = RedisDataManager()
         
+        # 启动时重置 Redis (强制重新拉取最新数据)
+        self.redis_mgr.reset_db()
+        
         # 初始化 Alpaca Data Stream (使用 IEX/SIP 需根据订阅情况)
         # 注意: paper=True 在 Live Client 中不适用，Data Stream 根据 API Key 权限决定数据源
         # 显式指定 feed='iex' 用于免费数据或测试，生产环境如有权限可用 'sip'
