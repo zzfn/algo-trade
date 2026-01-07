@@ -125,7 +125,6 @@ class DataProvider:
                     else:
                         show_end = show_end.astimezone(ny_tz)
                         
-                    print(f"DEBUG TIME: Now(UTC)={end} | End(ET)={show_end}")
                     print(f"⬇️  Fetching batch data from API ({show_start.strftime('%Y-%m-%d %H:%M:%S')} ET -> {show_end.strftime('%Y-%m-%d %H:%M:%S')} ET)...")
                     request_params = StockBarsRequest(
                         symbol_or_symbols=sym_list,

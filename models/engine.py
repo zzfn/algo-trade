@@ -150,7 +150,8 @@ class StrategyEngine:
             仓位分配比例 (如 0.10 表示 10%)
         """
         predicted_return = self.predict_return(symbol, l2_ranked)
-        base_allocation = get_allocation_by_return(predicted_return)
+        # Fix: 使用绝对值计算仓位 (无论是做多还是做空，只要预期幅度大就加大仓位)
+        base_allocation = get_allocation_by_return(abs(predicted_return))
         
         # L1 风险调整: 市场不安全时降低仓位
         if not l1_safe:

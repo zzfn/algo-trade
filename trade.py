@@ -375,7 +375,8 @@ class TradingBot:
         target_value = equity * allocation
         qty = int(target_value / price)
         
-        logger.info(f"💰 {symbol} 预期收益: {predicted_return:.2%}, 分配比例: {allocation:.1%}, 目标股数: {qty}")
+        # Fix: 显示绝对值预期收益 (代表本次交易的预期获利幅度)
+        logger.info(f"💰 {symbol} 预期收益: {abs(predicted_return):.2%}, 分配比例: {allocation:.1%}, 目标股数: {qty}")
         
         if qty <= 0:
             logger.warning(f"⚠️ 资金不足以买入 1 股 {symbol} (需要约 ${price:.2f}, 分配额度 ${target_value:.2f})")
