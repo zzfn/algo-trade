@@ -27,4 +27,4 @@ COPY . .
 RUN uv sync
 
 # 设置默认命令
-CMD ["uv", "run", "trade.py", "--interval", "1"]
+CMD ["uv", "run"]
