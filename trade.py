@@ -448,6 +448,21 @@ class TradingBot:
                 }
             }
             
+            # 辅助函数: 递归清理 NaN/Inf
+            def clean_nan(obj):
+                if isinstance(obj, float):
+                    if np.isnan(obj) or np.isinf(obj):
+                        return None
+                    return obj
+                elif isinstance(obj, dict):
+                    return {k: clean_nan(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [clean_nan(v) for v in obj]
+                return obj
+
+            # 清理非法浮点数
+            state = clean_nan(state)
+
             # 序列化为 JSON
             state_json = json.dumps(state, default=str)
             
