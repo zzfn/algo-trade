@@ -1,6 +1,5 @@
 import os
 import argparse
-import joblib
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -8,13 +7,12 @@ from dotenv import load_dotenv
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from data.provider import DataProvider
-from features.macro import L1FeatureBuilder
-from features.technical import FeatureBuilder
 from models.engine import StrategyEngine
 from models.constants import (
     get_feature_columns, 
-    L1_SAFE_THRESHOLD, SIGNAL_THRESHOLD, 
-    TOP_N_TRADES
+    SIGNAL_THRESHOLD, 
+    TOP_N_TRADES,
+    L2_SYMBOLS
 )
 from utils.logger import setup_logger
 
@@ -373,7 +371,6 @@ def main():
         symbols = args.symbols.split(",")
     else:
         # 默认使用所有 L2 标的
-        from models.constants import L2_SYMBOLS
         symbols = L2_SYMBOLS
         
     start_date = datetime.now() - timedelta(days=args.days)

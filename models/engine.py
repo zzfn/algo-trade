@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import pytz
 from data.provider import DataProvider
 from features.macro import L1FeatureBuilder
 from features.technical import FeatureBuilder
@@ -14,6 +13,9 @@ from models.constants import (
     L1_SYMBOLS, L2_SYMBOLS, TOP_N_TRADES
 )
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from utils.logger import setup_logger
+
+logger = setup_logger("engine")
 
 class StrategyEngine:
     def __init__(self):
@@ -111,10 +113,10 @@ class StrategyEngine:
             # 如果最新的 L3 数据 (1分钟线) 滞后超过 15 分钟 (允许少量延迟), 则认为是过期数据
             time_lag = target_dt - last_ts
             if time_lag > timedelta(minutes=15):
-                print(f"⚠️  Data Stale Warning: Latest data is from {last_ts}, lag is {time_lag}. Skipping trading.")
+                logger.warning(f"⚠️  Data Stale Warning: Latest data is from {last_ts}, lag is {time_lag}. Skipping trading.")
                 results['l3_signals'] = pd.DataFrame() # Clear signals to prevent trading
             elif time_lag > timedelta(minutes=5):
-                 print(f"⚠️  Data Lag Warning: Latest data is from {last_ts}, lag is {time_lag}.")
+                 logger.warning(f"⚠️  Data Lag Warning: Latest data is from {last_ts}, lag is {time_lag}.")
 
         return results
 

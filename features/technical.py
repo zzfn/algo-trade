@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+from utils.logger import setup_logger
+
+logger = setup_logger("features")
 
 class FeatureBuilder:
     def __init__(self):
@@ -57,7 +60,7 @@ class FeatureBuilder:
                    and c not in ['target_spy_5d']]
         
         if not l1_cols:
-            print("  Warning: No L1 macro features found!")
+            logger.warning("  Warning: No L1 macro features found!")
             return df
         
         # 使用 merge_asof 进行时间对齐 (向前填充最近的 L1 数据)

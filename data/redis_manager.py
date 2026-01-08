@@ -3,10 +3,13 @@ import os
 import json
 import pandas as pd
 import redis
-import numpy as np
+import pytz
 from datetime import datetime
-from typing import Optional, List, Union
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from typing import Optional
+from alpaca.data.timeframe import TimeFrame
+from utils.logger import setup_logger
+
+logger = setup_logger("redis_manager")
 
 class RedisDataManager:
     def __init__(self, host='localhost', port=6379, db=0, password=None):
@@ -29,11 +32,11 @@ class RedisDataManager:
             keys = self.redis.keys("market_data:*")
             if keys:
                 self.redis.delete(*keys)
-                print(f"🧹 已清理 {len(keys)} 个 Redis 市场数据 Key")
+                logger.info(f"🧹 已清理 {len(keys)} 个 Redis 市场数据 Key")
             else:
-                print("🧹 Redis 已空，无需清理")
+                logger.info("🧹 Redis 已空，无需清理")
         except Exception as e:
-            print(f"⚠️ Redis 清理失败: {e}")
+            logger.warning(f"⚠️ Redis 清理失败: {e}")
         
     def get_key(self, symbol: str, timeframe: TimeFrame) -> str:
         """生成 Redis Key: market_data:{symbol}:{tf}"""
@@ -48,7 +51,6 @@ class RedisDataManager:
         if result:
             _, score = result[0]
             # score 是 UTC 时间戳
-            import pytz
             utc_dt = datetime.fromtimestamp(score, tz=pytz.utc)
             ny_tz = pytz.timezone('America/New_York')
             ny_dt = utc_dt.astimezone(ny_tz)
@@ -80,7 +82,6 @@ class RedisDataManager:
             # 假设 ts 是 Naive NY Time (项目约定), 先 localize 到 NY, 再转 UTC
             if ts.tzinfo is None:
                 # 只有当它是 naive 时才当作 NY Time 处理
-                import pytz
                 ny_tz = pytz.timezone('America/New_York')
                 ts_aware = ny_tz.localize(ts)
                 timestamp_score = ts_aware.timestamp() # .timestamp() returns UTC timestamp for aware obj
@@ -106,7 +107,7 @@ class RedisDataManager:
         pipeline.zremrangebyrank(key, 0, -(KEEP_COUNT + 1))
             
         pipeline.execute()
-        print(f"💾 Saved {len(df)} bars to Redis: {key} (Trimmed to last {KEEP_COUNT})")
+        logger.debug(f"💾 Saved {len(df)} bars to Redis: {key} (Trimmed to last {KEEP_COUNT})")
 
     def get_bars(self, symbol: str, timeframe: TimeFrame, start: datetime, end: datetime) -> pd.DataFrame:
         """从 Redis 获取指定时间范围的数据"""
@@ -125,7 +126,6 @@ class RedisDataManager:
         for member, score in results:
             data = json.loads(member)
             # score 是 UTC 时间戳
-            import pytz
             utc_dt = datetime.fromtimestamp(score, tz=pytz.utc)
             ny_tz = pytz.timezone('America/New_York')
             ny_dt = utc_dt.astimezone(ny_tz)

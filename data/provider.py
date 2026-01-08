@@ -1,11 +1,18 @@
 import os
 import pandas as pd
+import pytz
+import traceback
+import hashlib
 from datetime import datetime, timedelta
 from typing import Optional, List, Union
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.data.enums import DataFeed
+from data.redis_manager import RedisDataManager
+from utils.logger import setup_logger
+
+logger = setup_logger("data_provider")
 
 class DataProvider:
     @staticmethod
@@ -46,7 +53,6 @@ class DataProvider:
         if end is None:
             # 强制将本地时间视为北京时间 (Asia/Shanghai)
             # 这是为了解决用户系统时区设置不正确的问题
-            import pytz
             local_naive = datetime.now()
             beijing_tz = pytz.timezone('Asia/Shanghai')
             # 假定本地时间就是北京时间
@@ -65,7 +71,6 @@ class DataProvider:
         # --- Redis 增量更新逻辑 ---
         if use_redis:
             try:
-                from data.redis_manager import RedisDataManager
                 redis_mgr = RedisDataManager()
                 
                 # 统一处理单个和多个标的
@@ -90,7 +95,6 @@ class DataProvider:
                     min_ts = min(latest_timestamps)
                     
                     # 转换 min_ts 为 ET 用于显示
-                    import pytz
                     ny_tz = pytz.timezone('America/New_York')
                     show_min_ts = min_ts.astimezone(ny_tz) if min_ts.tzinfo else pytz.utc.localize(min_ts).astimezone(ny_tz)
                     show_start_chk = start.astimezone(ny_tz) if start.tzinfo else pytz.utc.localize(start).astimezone(ny_tz)
@@ -98,22 +102,20 @@ class DataProvider:
                     if min_ts >= start:
                          # 增量起点: 最早的缓存时间 + 1分钟 (防止重叠)
                         active_start_time = min_ts + timedelta(minutes=1)
-                        print(f"🔄 Redis 批量增量: 本地数据均新于 {show_min_ts.strftime('%Y-%m-%d %H:%M:%S')} ET, 仅拉取增量...")
+                        logger.info(f"🔄 Redis 批量增量: 本地数据均新于 {show_min_ts.strftime('%Y-%m-%d %H:%M:%S')} ET, 仅拉取增量...")
                     else:
-                        print(f"📥 Redis 数据较旧 (部分旧于 {show_start_chk.strftime('%Y-%m-%d %H:%M:%S')} ET), 拉取完整历史...")
+                        logger.info(f"📥 Redis 数据较旧 (部分旧于 {show_start_chk.strftime('%Y-%m-%d %H:%M:%S')} ET), 拉取完整历史...")
                 else:
-                    print(f"📥 Redis 部分标的缺数据, 拉取完整历史...")
+                    logger.info(f"📥 Redis 部分标的缺数据, 拉取完整历史...")
 
                 # 2. 从 API 批量拉取数据 (如果需要)
                 if active_start_time < end:
                     # 转换显示时间为 ET
-                    import pytz
                     ny_tz = pytz.timezone('America/New_York')
                     
                     show_start = active_start_time
                     if show_start.tzinfo is None:
                         # Assumed to be Naive NY Time (based on project convention)
-                        import pytz
                         ny_tz = pytz.timezone('America/New_York')
                         show_start = ny_tz.localize(show_start)
                     else:
@@ -126,7 +128,7 @@ class DataProvider:
                     else:
                         show_end = show_end.astimezone(ny_tz)
                         
-                    print(f"⬇️  Fetching batch data from API ({show_start.strftime('%Y-%m-%d %H:%M:%S')} ET -> {show_end.strftime('%Y-%m-%d %H:%M:%S')} ET)...")
+                    logger.info(f"⬇️  Fetching batch data from API ({show_start.strftime('%Y-%m-%d %H:%M:%S')} ET -> {show_end.strftime('%Y-%m-%d %H:%M:%S')} ET)...")
                     request_params = StockBarsRequest(
                         symbol_or_symbols=sym_list,
                         timeframe=timeframe,
@@ -137,10 +139,10 @@ class DataProvider:
                     try:
                         bars = self.client.get_stock_bars(request_params)
                         new_df = bars.df
-                        print(f"✅ API returned {len(new_df)} rows of data.")
+                        logger.info(f"✅ API returned {len(new_df)} rows of data.")
                         
                         if not new_df.empty:
-                            print(f"🔍 API Data Preview:\n{new_df.iloc[[0, -1]][['timestamp']] if 'timestamp' in new_df.columns else new_df.index[[0, -1]]}")
+                            logger.debug(f"🔍 API Data Preview:\n{new_df.iloc[[0, -1]][['timestamp']] if 'timestamp' in new_df.columns else new_df.index[[0, -1]]}")
 
                             # 统一格式处理
                             if isinstance(new_df.index, pd.MultiIndex):
@@ -160,12 +162,10 @@ class DataProvider:
                                 redis_mgr.save_bars(group, sym, timeframe)
                                 
                     except Exception as e:
-                        import traceback
-                        print(f"⚠️  Batch fetch failed (maybe no new data): {e}")
-                        print(traceback.format_exc())
+                        logger.warning(f"⚠️  Batch fetch failed (maybe no new data): {e}")
+                        logger.debug(traceback.format_exc())
 
                 # 4. 从 Redis 组装完整数据集返回
-                import pytz
                 ny_tz = pytz.timezone('America/New_York')
                 
                 show_start_full = start
@@ -182,7 +182,7 @@ class DataProvider:
                 else:
                      show_end_full = show_end_full.astimezone(ny_tz)
 
-                print(f"📦 Loading full batch dataset from Redis ({show_start_full.strftime('%Y-%m-%d %H:%M:%S')} ET -> {show_end_full.strftime('%Y-%m-%d %H:%M:%S')} ET)...")
+                logger.info(f"📦 Loading full batch dataset from Redis ({show_start_full.strftime('%Y-%m-%d %H:%M:%S')} ET -> {show_end_full.strftime('%Y-%m-%d %H:%M:%S')} ET)...")
                 all_data = []
                 for sym in sym_list:
                     df_sym = redis_mgr.get_bars(sym, timeframe, start, end)
@@ -199,9 +199,9 @@ class DataProvider:
                     return pd.DataFrame()
                 
             except ImportError:
-                print("⚠️  Redis dependencies not installed. Falling back to file cache.")
+                logger.warning("⚠️  Redis dependencies not installed. Falling back to file cache.")
             except Exception as e:
-                print(f"⚠️  Redis batch operation failed: {e}. Falling back to file cache.")
+                logger.warning(f"⚠️  Redis batch operation failed: {e}. Falling back to file cache.")
 
         # --- 原有的文件缓存逻辑 (Fallback) ---
         # 1. 生成缓存文件名
@@ -209,7 +209,6 @@ class DataProvider:
         sym_str = symbols if isinstance(symbols, str) else "_".join(sorted(symbols))
         # 如果 symbol 太多，使用 hash 避免文件名过长
         if len(sym_str) > 50:
-            import hashlib
             sym_str = hashlib.md5(sym_str.encode()).hexdigest()
             
         tf_str = self.get_tf_string(timeframe)
@@ -221,14 +220,14 @@ class DataProvider:
         # 2. 尝试读取缓存
         if use_cache and os.path.exists(cache_file):
             try:
-                print(f"📦 Loading cached data from {cache_file}...")
+                logger.info(f"📦 Loading cached data from {cache_file}...")
                 df = pd.read_parquet(cache_file)
                 return df
             except Exception as e:
-                print(f"⚠️  Cache load failed, fetching from API: {e}")
+                logger.warning(f"⚠️  Cache load failed, fetching from API: {e}")
 
         # 3. 从 API 获取数据
-        print(f"⬇️  Fetching data from Alpaca API ([{sym_str}] {tf_str})...")
+        logger.info(f"⬇️  Fetching data from Alpaca API ([{sym_str}] {tf_str})...")
         request_params = StockBarsRequest(
             symbol_or_symbols=symbols,
             timeframe=timeframe,
@@ -257,9 +256,9 @@ class DataProvider:
         if use_cache and not df.empty:
             try:
                 df.to_parquet(cache_file, index=False)
-                print(f"💾 Data cached to {cache_file}")
+                logger.info(f"💾 Data cached to {cache_file}")
             except Exception as e:
-                print(f"⚠️  Cache save failed: {e}")
+                logger.warning(f"⚠️  Cache save failed: {e}")
             
         return df
 
@@ -271,6 +270,6 @@ if __name__ == "__main__":
         end = datetime.now()
         start = end - timedelta(days=30)
         data = provider.fetch_bars("QQQ", TimeFrame.Day, start, end)
-        print(data.head())
+        logger.info(data.head())
     except Exception as e:
-        print(f"Error fetching data: {e}")
+        logger.error(f"Error fetching data: {e}")

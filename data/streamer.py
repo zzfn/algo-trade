@@ -1,11 +1,11 @@
 import os
-import asyncio
-import signal
 import pandas as pd
+import pytz
 from datetime import datetime
 from loguru import logger
 from alpaca.data.live.stock import StockDataStream
 from alpaca.data.enums import DataFeed
+from alpaca.data.timeframe import TimeFrame
 from dotenv import load_dotenv
 
 from models.constants import L2_SYMBOLS
@@ -42,7 +42,6 @@ class MarketDataStreamer:
         """处理接收到的 1分钟 K线数据"""
         try:
             # bar 是 alpaca.data.models.Bar 对象
-            import pytz
             ny_tz = pytz.timezone('America/New_York')
             
             symbol = bar.symbol
@@ -69,7 +68,6 @@ class MarketDataStreamer:
             
             # 写入 Redis
             # 这里的 timeframe 默认为 1Minute，因为 StockDataStream 发送的是分钟线
-            from alpaca.data.timeframe import TimeFrame
             self.redis_mgr.save_bars(df, symbol, TimeFrame.Minute)
             
         except Exception as e:

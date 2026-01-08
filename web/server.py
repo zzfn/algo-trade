@@ -8,17 +8,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
-import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
+import traceback
+import uvicorn
 from dotenv import load_dotenv
 
-# 加载环境变量
-load_dotenv()
-
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from web.state_manager import StateManager
 from models.engine import StrategyEngine
-from models.constants import TOP_N_TRADES, SIGNAL_THRESHOLD
+from models.constants import TOP_N_TRADES, SIGNAL_THRESHOLD, get_feature_columns, L3_LOOKBACK_DAYS, L2_SYMBOLS
+from scripts.backtest import BacktestEngine
 
 app = FastAPI(
     title="Algo Trade Dashboard",
@@ -46,7 +46,6 @@ try:
     strategy_engine = StrategyEngine()
     print("✅ 预测引擎初始化成功")
 except Exception as e:
-    import traceback
     error_msg = f"⚠️ 预测引擎初始化失败: {e}"
     print(error_msg)
     print(traceback.format_exc())
@@ -143,7 +142,6 @@ async def run_prediction():
         
         return response
     except Exception as e:
-        import traceback
         print(f"❌ 预测失败: {e}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"预测失败: {str(e)}")
@@ -213,9 +211,6 @@ async def get_l3_debug(symbols: str = None):
     try:
         # 如果传入了自定义股票列表，直接进行L3预测
         if symbols:
-            from datetime import timedelta
-            from alpaca.data.timeframe import TimeFrame
-            from models.constants import get_feature_columns, L3_LOOKBACK_DAYS
             
             # 解析股票列表
             symbol_list = [s.strip().upper() for s in symbols.split(',') if s.strip()]
@@ -324,7 +319,6 @@ async def get_l3_debug(symbols: str = None):
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
         print(f"❌ L3预测失败: {e}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
@@ -419,11 +413,6 @@ class BacktestRequest(BaseModel):
 async def run_backtest_api(req: BacktestRequest):
     """运行回测"""
     try:
-        from scripts.backtest import BacktestEngine
-        from datetime import datetime, timedelta
-        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-        from models.constants import L2_SYMBOLS
-        
         # 1. 解析参数
         if req.symbols:
             symbols = [s.strip().upper() for s in req.symbols.split(',') if s.strip()]
@@ -451,7 +440,6 @@ async def run_backtest_api(req: BacktestRequest):
         return result
         
     except Exception as e:
-        import traceback
         print(f"❌ 回测失败: {e}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
@@ -479,5 +467,4 @@ async def health_check():
 
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

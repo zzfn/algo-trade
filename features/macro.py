@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 
 class L1FeatureBuilder:
     def build_l1_features(self, df_dict: dict) -> pd.DataFrame:

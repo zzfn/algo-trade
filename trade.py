@@ -6,10 +6,10 @@ from datetime import datetime, timedelta
 import pytz
 from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest, TakeProfitRequest, StopLossRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus, OrderClass, QueryOrderStatus
+from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
+from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
 import numpy as np
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from alpaca.data.timeframe import TimeFrame
 from models.engine import StrategyEngine
 from models.constants import TOP_N_TRADES, SIGNAL_THRESHOLD, L1_RISK_FACTOR
 from models.dynamic_params import get_dynamic_params
