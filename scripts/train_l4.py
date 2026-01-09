@@ -79,7 +79,7 @@ def train_l4_model():
     
     df = builder.add_return_target(df, horizon=5)
     
-    # 删除 NaN
+    # 预处理已在 add_all_features 中完成,这里手动删除 NaN
     df = df.dropna()
     print(f"  Valid training samples: {len(df)}")
     

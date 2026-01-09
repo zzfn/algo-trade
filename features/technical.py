@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from utils.logger import setup_logger
+from data.preprocessor import DataPreprocessor
 
 logger = setup_logger("features")
 
@@ -8,14 +9,24 @@ class FeatureBuilder:
     def __init__(self):
         pass
 
-    def add_all_features(self, df: pd.DataFrame, is_training: bool = True) -> pd.DataFrame:
+    def add_all_features(self, df: pd.DataFrame, is_training: bool = True, use_preprocessor: bool = True) -> pd.DataFrame:
         """
         Add all technical indicators to the dataframe.
         Supports multi-symbol DataFrames by grouping by 'symbol'.
+        
+        Args:
+            df: 原始 OHLCV 数据
+            is_training: 是否为训练模式
+            use_preprocessor: 是否使用数据预处理管道 (默认 True)
         """
         df = df.copy()
         
-        # 针对每个标的独立计算技术指标
+        # 1. 数据预处理 (新增)
+        if use_preprocessor:
+            preprocessor = DataPreprocessor()
+            df = preprocessor.clean_pipeline(df, is_training=is_training)
+        
+        # 2. 针对每个标的独立计算技术指标
         processed_groups = []
         for symbol, group in df.groupby('symbol'):
             # 排除 symbol 列传给处理函数，处理完后再加回
@@ -24,7 +35,7 @@ class FeatureBuilder:
             processed_groups.append(processed)
         df = pd.concat(processed_groups).reset_index(drop=True)
         
-        # 添加全局特征 (如洗盘信号)
+        # 3. 添加全局特征 (如洗盘信号)
         df = self.add_shakeout_features(df)
         
         if is_training:
@@ -110,6 +121,18 @@ class FeatureBuilder:
         return tr.rolling(window=period).mean()
 
     def add_returns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        添加收益率特征
+        注意: 如果使用了 preprocessor, log_return_1p 和 log_return_5p 已经计算
+        这里保留 return_1p/5p 是为了向后兼容,但推荐使用 log returns
+        """
+        # 如果预处理器已经计算了 log returns,直接使用
+        if 'log_return_1p' not in df.columns:
+            df['log_return_1p'] = np.log(df['close'] / df['close'].shift(1))
+        if 'log_return_5p' not in df.columns:
+            df['log_return_5p'] = np.log(df['close'] / df['close'].shift(5))
+        
+        # 为了兼容性,也保留简单收益率
         df['return_1p'] = df['close'].pct_change(1)
         df['return_5p'] = df['close'].pct_change(5)
         df['target_return'] = df['close'].pct_change().shift(-1)
@@ -165,7 +188,11 @@ class FeatureBuilder:
         return df
 
     def add_volatility(self, df: pd.DataFrame) -> pd.DataFrame:
-        df['volatility_20d'] = df['close'].pct_change().rolling(window=20).std()
+        # 使用 log returns 计算波动率 (更稳定)
+        if 'log_return_1p' in df.columns:
+            df['volatility_20d'] = df['log_return_1p'].rolling(window=20).std()
+        else:
+            df['volatility_20d'] = df['close'].pct_change().rolling(window=20).std()
         return df
 
     def add_price_action(self, df: pd.DataFrame) -> pd.DataFrame:

@@ -23,10 +23,11 @@ def train_l3_model():
     df_raw = provider.fetch_bars(symbols, TimeFrame.Minute, start_date, end_date)
     print(f"Raw data rows: {len(df_raw)}")
     
-    # 2. 构建特征
+    # 2. 构建特征 (预处理已集成在 add_all_features 中)
     print("Building features...")
     df = builder.add_all_features(df_raw, is_training=False)
     df = builder.add_classification_target(df, horizon=15, threshold=0.003)
+    # dropna 已在 add_all_features(is_training=True) 中处理,这里需要手动调用
     df = df.dropna()
     
     feature_cols = get_feature_columns(df)
