@@ -119,12 +119,13 @@ class TradingBot:
             # fallback to local time if clock fails
             target_dt = datetime.now(self.ny_tz).replace(tzinfo=None)
         
-        # 2. 检查账户与持仓
+        # 2. 检查账户与持仓 (统一获取，减少 API 调用)
         account = self.get_account_info()
-        logger.info(f"Equity: ${float(account.equity):.2f} | Buying Power: ${float(account.buying_power):.2f}")
-        
         positions = self.get_positions()
+        
+        logger.info(f"Equity: ${float(account.equity):.2f} | Buying Power: ${float(account.buying_power):.2f}")
         logger.info(f"📦 Current Positions ({len(positions)}):")
+        
         if not positions:
             logger.info("   (No active positions)")
         for p in positions:
@@ -205,8 +206,8 @@ class TradingBot:
         long_signals = self.engine.filter_signals(l3_signals, direction="long", top_n=current_top_n, threshold=current_threshold)
         short_signals = self.engine.filter_signals(l3_signals, direction="short", top_n=current_top_n, threshold=current_threshold)
 
-        # 5. 持仓管理 (动态止盈止损 / 信号平仓)
-        closed_symbols = self.manage_positions(l3_signals, all_ranked)
+        # 5. 持仓管理 (动态止盈止损 / 信号平仓) - 传入预获取的 positions
+        closed_symbols = self.manage_positions(l3_signals, all_ranked, positions)
 
         # 6. 信号执行 (Signal Execution)
         # L1 作为风险因子: 不安全时降低仓位而非禁止交易
@@ -216,21 +217,49 @@ class TradingBot:
         else:
             logger.warning(f"⚠️ L1 Market Safety: UNSAFE (概率: {l1_prob:.2%}) - 降低仓位至 {current_risk_factor:.1%}")
 
+        # 跟踪本轮已分配的购买力
+        available_bp = float(account.buying_power)
+
         # 多头信号
         executed_longs = 0
         for _, signal in long_signals.iterrows():
-            success = self.execute_trade(signal['symbol'], OrderSide.BUY, "long", all_ranked, price=signal['close'], l1_safe=l1_safe, closed_symbols=closed_symbols)
+            # 传入 account 和 positions 避免重复查询，同时传入 available_bp
+            success, cost = self.execute_trade(
+                signal['symbol'], 
+                OrderSide.BUY, 
+                "long", 
+                all_ranked, 
+                price=signal['close'], 
+                l1_safe=l1_safe, 
+                closed_symbols=closed_symbols,
+                account=account,
+                positions=positions,
+                available_bp=available_bp
+            )
             if success:
                 executed_longs += 1
+                available_bp -= cost
         if executed_longs > 0:
             logger.info(f"📊 本轮多头交易: 成功执行 {executed_longs} 笔")
 
         # 空头信号
         executed_shorts = 0
         for _, signal in short_signals.iterrows():
-            success = self.execute_trade(signal['symbol'], OrderSide.SELL, "short", all_ranked, price=signal['close'], l1_safe=l1_safe, closed_symbols=closed_symbols)
+            success, cost = self.execute_trade(
+                signal['symbol'], 
+                OrderSide.SELL, 
+                "short", 
+                all_ranked, 
+                price=signal['close'], 
+                l1_safe=l1_safe, 
+                closed_symbols=closed_symbols,
+                account=account,
+                positions=positions,
+                available_bp=available_bp
+            )
             if success:
                 executed_shorts += 1
+                available_bp -= cost
         if executed_shorts > 0:
             logger.info(f"📊 本轮空头交易: 成功执行 {executed_shorts} 笔")
         
@@ -245,7 +274,7 @@ class TradingBot:
             is_market_open=True
         )
 
-    def manage_positions(self, l3_signals, l2_ranked):
+    def manage_positions(self, l3_signals, l2_ranked, positions):
         """
         主动管理现有持仓:
         1. 基于价格的止盈止损检查 (优先)
@@ -254,9 +283,8 @@ class TradingBot:
         Args:
             l3_signals: L3 趋势信号 DataFrame
             l2_ranked: L2 排序后的 DataFrame (用于获取特征和计算风控参数)
+            positions: 预获取的持仓列表
         """
-
-        positions = self.get_positions()
         closed_symbols = set()
         if not positions:
             return closed_symbols
@@ -344,49 +372,58 @@ class TradingBot:
         
         return closed_symbols
 
-    def execute_trade(self, symbol, side, direction, l2_ranked, price, l1_safe=True, closed_symbols=None):
+    def execute_trade(self, symbol, side, direction, l2_ranked, price, l1_safe=True, closed_symbols=None, account=None, positions=None, available_bp=None):
 
         if closed_symbols and symbol in closed_symbols:
             logger.info(f"ℹ️ {symbol} 本轮刚触发平仓，跳过开仓 (等待订单结算)。")
-            return False
+            return False, 0
 
-        positions = self.get_positions()
+        if positions is None:
+            positions = self.get_positions()
 
 
         # 2. 检查是否已有该标的持仓 (若有，则说明方向一致，继续持有)
         for p in positions:
             if p.symbol == symbol:
                 logger.info(f"ℹ️ {symbol} 已有持仓，保持现状 (Hold)。")
-                return False
+                return False, 0
         
         # 3. 检查是否有该标的的挂单
         open_orders = self.get_open_orders()
         for order in open_orders:
             if order.symbol == symbol:
                 logger.info(f"⏳ {symbol} 已有挂单 (ID: {order.id})，等待成交。")
-                return False
+                return False, 0
 
         # 5. 计算下单股数 (Position Sizing) - 动态仓位分配 (考虑 L1 风险)
         predicted_return = self.engine.predict_return(symbol, l2_ranked)
         allocation = self.engine.get_allocation(symbol, l2_ranked, l1_safe=l1_safe)
         
-        account = self.get_account_info()
+        if account is None:
+            account = self.get_account_info()
+        
+        if available_bp is None:
+            available_bp = float(account.buying_power)
+        
         equity = float(account.equity)
-        target_value = equity * allocation
+        # 目标价值不能超过当前剩余可用购买力
+        target_value = min(equity * allocation, available_bp * 0.95) # 预留 5% 缓冲
         qty = int(target_value / price)
         
+        cost = qty * price
+        
         # Fix: 显示绝对值预期收益 (代表本次交易的预期获利幅度)
-        logger.info(f"💰 {symbol} 预期收益: {abs(predicted_return):.2%}, 分配比例: {allocation:.1%}, 目标股数: {qty}")
+        logger.info(f"💰 {symbol} 预期收益: {abs(predicted_return):.2%}, 分配比例: {allocation:.1%}, 目标股数: {qty} (预计占用: ${cost:.2f})")
         
         if qty <= 0:
-            logger.warning(f"⚠️ 资金不足以买入 1 股 {symbol} (需要约 ${price:.2f}, 分配额度 ${target_value:.2f})")
-            return False
+            logger.warning(f"⚠️ 购买力不足以买入 1 股 {symbol} (需要约 ${price:.2f}, 当前轮次剩余可用 ${available_bp:.2f})")
+            return False, 0
 
         # 6. 设置止盈止损价格 (从 SMC 规则获取)
         risk = self.engine.get_risk_params(symbol, direction, l2_ranked)
         if not risk:
             logger.warning(f"⚠️ 无法计算 {symbol} 的风控参数 (可能数据不足)，跳过")
-            return False
+            return False, 0
 
         tp_price = risk['take_profit']
         sl_price = risk['stop_loss']
@@ -407,10 +444,10 @@ class TradingBot:
             )
             order = self.trading_client.submit_order(order_data)
             logger.info(f"✅ 订单已提交! ID: {order.id}")
-            return True
+            return True, cost
         except Exception as e:
             logger.error(f"❌ 下单失败: {e}")
-            return False
+            return False, 0
     
     def publish_state(self, account, positions, long_signals, short_signals, l1_safe, l1_prob, is_market_open):
         """发布交易状态到 Dashboard (Redis + 文件备份)"""

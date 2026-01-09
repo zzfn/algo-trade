@@ -40,12 +40,14 @@ def get_smc_stop_loss(row: pd.Series, direction: str) -> float:
 
 def get_smc_take_profit(row: pd.Series, direction: str, risk_reward: float = None) -> float:
     """
-    基于盈亏比计算止盈价格。
+    基于 SMC 概念和盈亏比计算止盈价格。
     
-    止盈 = 入场价 ± (风险距离 × 盈亏比)
+    1. 优先寻找最近的流动性区/阻力位 (local_high/local_low)
+    2. 如果阻力位提供的盈亏比合理 (>= 1.2)，则使用该位
+    3. 否则，基于默认盈亏比计算止盈
     
     Args:
-        row: 包含 close 等价格数据的 Series
+        row: 包含 close, local_high, local_low 等价格数据的 Series
         direction: 'long' 或 'short'
         risk_reward: 盈亏比，默认使用 RISK_REWARD_RATIO
         
@@ -59,10 +61,26 @@ def get_smc_take_profit(row: pd.Series, direction: str, risk_reward: float = Non
     stop_loss = get_smc_stop_loss(row, direction)
     risk = abs(entry - stop_loss)
     
+    # 计算基于 RR 的默认止盈
+    rr_tp = entry + risk * risk_reward if direction == "long" else entry - risk * risk_reward
+    
+    # 尝试寻找 SMC 流动性目标 (最近的 Swing High/Low)
     if direction == "long":
-        return entry + risk * risk_reward
+        target = row.get('local_high')
+        if pd.notnull(target) and target > entry:
+            # 检查流动性目标的盈亏比
+            target_rr = (target - entry) / (risk + 1e-9)
+            if target_rr >= 1.2:  # 如果至少能达到 1.2 倍盈亏比
+                # 取 RR 止盈和流动性目标的较小值 (更保守) 或目标位
+                return min(target, rr_tp) if target_rr > risk_reward else target
+        return rr_tp
     else:
-        return entry - risk * risk_reward
+        target = row.get('local_low')
+        if pd.notnull(target) and target < entry:
+            target_rr = (entry - target) / (risk + 1e-9)
+            if target_rr >= 1.2:
+                return max(target, rr_tp) if target_rr > risk_reward else target
+        return rr_tp
 
 
 def get_smc_risk_params(row: pd.Series, direction: str, risk_reward: float = None) -> dict:
