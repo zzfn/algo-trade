@@ -45,7 +45,23 @@ class StrategyEngine:
         
         # --- L1: Market Timing ---
         l1_start = target_dt - timedelta(days=L1_LOOKBACK_DAYS)
-        df_l1_dict = {sym: self.provider.fetch_bars(sym, TimeFrame.Day, l1_start, target_dt + timedelta(days=1), use_redis=True) for sym in self.l1_symbols}
+        
+        # ✅ 批量获取所有市场指标数据 (优化性能)
+        df_l1_all = self.provider.fetch_bars(
+            self.l1_symbols,  # 批量查询 ['SPY', 'VIXY', 'TLT']
+            TimeFrame.Day, 
+            l1_start, 
+            target_dt + timedelta(days=1), 
+            use_redis=True
+        )
+        
+        # 按标的分组
+        df_l1_dict = {}
+        if not df_l1_all.empty:
+            grouped = df_l1_all.groupby('symbol')
+            for sym, df in grouped:
+                df_l1_dict[sym] = df
+        
         df_l1_feats = self.l1_builder.build_l1_features(df_l1_dict)
         df_l1_feats = df_l1_feats[df_l1_feats['timestamp'] <= target_dt]
         

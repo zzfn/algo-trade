@@ -22,13 +22,23 @@ def run_l2_backtest(days=90, top_n=3):
     start_date = end_date - timedelta(days=days)
     fetch_start = start_date - timedelta(days=L2_LOOKBACK_DAYS)
     
-    # 1. 获取数据 (所有 L2 标的)
+    # 1. 获取数据 (所有 L2 标的) - 批量查询
     logger.info(f"获取 {len(L2_SYMBOLS)} 个标的数据...")
     
+    # ✅ 批量获取所有 L2 标的数据 (一次性查询)
+    df_all = engine.provider.fetch_bars(
+        L2_SYMBOLS,  # 批量查询列表
+        TimeFrame.Hour, 
+        fetch_start, 
+        end_date,
+        use_redis=True  # 启用 Redis 缓存
+    )
+    
+    # 按标的分组并添加特征
     all_dfs = []
-    for sym in L2_SYMBOLS:
-        df = engine.provider.fetch_bars(sym, TimeFrame.Hour, fetch_start, end_date)
-        if not df.empty:
+    if not df_all.empty:
+        grouped = df_all.groupby('symbol')
+        for sym, df in grouped:
             df = engine.l2_builder.add_all_features(df, is_training=False)
             all_dfs.append(df)
             

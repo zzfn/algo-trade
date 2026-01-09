@@ -23,12 +23,27 @@ def run_l1_backtest(days=365):
     start_date = end_date - timedelta(days=days)
     fetch_start = start_date - timedelta(days=L1_LOOKBACK_DAYS) # Extra buffer for MA200
     
-    # 1. 获取数据
+    # 1. 获取数据 - 批量查询所有市场指标
     logger.info("获取市场数据 (SPY, VIXY, TLT)...")
-    df_l1_dict = {
-        sym: engine.provider.fetch_bars(sym, TimeFrame.Day, fetch_start, end_date) 
-        for sym in L1_SYMBOLS
-    }
+    
+    # ✅ 批量获取所有市场指标数据 (一次性查询)
+    df_all = engine.provider.fetch_bars(
+        L1_SYMBOLS,  # 批量查询列表
+        TimeFrame.Day, 
+        fetch_start, 
+        end_date,
+        use_redis=True  # 启用 Redis 缓存
+    )
+    
+    # 按标的分组
+    df_l1_dict = {}
+    if not df_all.empty:
+        grouped = df_all.groupby('symbol')
+        for sym, df in grouped:
+            df_l1_dict[sym] = df
+    else:
+        logger.error("无法获取市场数据")
+        return
     
     # 2. 构建特征
     logger.info("构建 L1 特征...")

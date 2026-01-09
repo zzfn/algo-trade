@@ -143,13 +143,22 @@ class BacktestEngine:
         # df_l1_dict = {sym: self.engine.provider.fetch_bars(sym, TimeFrame.Day, l1_start, end_date) for sym in self.engine.l1_symbols}
         # self.market_features = self.engine.l1_builder.build_l1_features(df_l1_dict)
         
-        # L2/3/4 数据 (这里简化：直接用主回测周期的数据计算特征，假设 timeframe 足够细)
-        # 注意：这里我们直接用传入的 timeframe 作为主驱动周期
+        # L2/3/4 数据 - 批量获取所有股票数据 (性能优化)
         fetch_start = start_date - timedelta(days=60) # 预留指标计算窗口
         
-        for sym in symbols:
-            df = self.engine.provider.fetch_bars([sym], timeframe, fetch_start, end_date)
-            if not df.empty:
+        # ✅ 批量获取所有股票数据 (一次性查询,避免重复 Redis 访问)
+        df_all = self.engine.provider.fetch_bars(
+            symbols,  # 传入列表,而不是循环单个查询
+            timeframe, 
+            fetch_start, 
+            end_date,
+            use_redis=True  # 启用 Redis 缓存
+        )
+        
+        # 按股票分组处理
+        if not df_all.empty:
+            grouped = df_all.groupby('symbol')
+            for sym, df in grouped:
                 # 预计算所有特征 (L2/L3/L4 需要的)
                 df = self.engine.l2_builder.add_all_features(df, is_training=False)
                 # 预计算 L2 得分 (提速)
@@ -165,8 +174,7 @@ class BacktestEngine:
                 df['long_p'] = 0.99 
                 df['short_p'] = 0.99
                 
-                # 仅保留回测所需列以节省内存，但在回测时需要用整行数据计算 risk
-                # df = df[['timestamp', 'open', 'high', 'low', 'close', 'rank_score', 'long_p', 'short_p', ...]]
+                # 保存处理后的数据
                 self.bars[sym] = df
         
         logger.info(f"✅ 数据准备完成。覆盖 {len(self.bars)} 个标的。")
