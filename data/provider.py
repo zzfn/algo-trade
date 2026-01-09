@@ -8,7 +8,7 @@ from typing import Optional, List, Union
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-from alpaca.data.enums import DataFeed
+from alpaca.data.enums import DataFeed, Adjustment
 from data.redis_manager import RedisDataManager
 from utils.logger import setup_logger
 
@@ -134,7 +134,8 @@ class DataProvider:
                         timeframe=timeframe,
                         start=active_start_time,
                         end=end,
-                        feed=DataFeed.IEX
+                        feed=DataFeed.IEX,
+                        adjustment=Adjustment.ALL  # 前复权（处理拆股和分红）
                     )
                     try:
                         bars = self.client.get_stock_bars(request_params)
@@ -233,7 +234,8 @@ class DataProvider:
             timeframe=timeframe,
             start=start,
             end=end,
-            feed=DataFeed.IEX
+            feed=DataFeed.IEX,
+            adjustment=Adjustment.ALL  # 前复权（处理拆股和分红）
         )
         
         bars = self.client.get_stock_bars(request_params)
