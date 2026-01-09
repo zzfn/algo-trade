@@ -21,29 +21,21 @@ class RankingModelTrainer:
         df: pd.DataFrame, 
         feature_cols: List[str], 
         target_col: str,
-        purge_periods: int = 5,
-        use_time_decay: bool = True,
-        decay_half_life_days: int = 90
+        purge_periods: int = 5
     ) -> dict:
         """
-        使用稳健训练方法 (Purged CV + 样本加权)
+        使用稳健训练方法 (Purged CV)
         
         Args:
             df: 训练数据
             feature_cols: 特征列
             target_col: 目标列
             purge_periods: 样本清除周期数 (防止信息泄露)
-            use_time_decay: 是否使用时间衰减权重
-            decay_half_life_days: 时间衰减半衰期 (天)
             
         Returns:
             训练结果字典 (包含 cv_scores, mean_ndcg, std_ndcg)
         """
-        config = RobustTrainConfig(
-            purge_periods=purge_periods,
-            use_time_decay=use_time_decay,
-            decay_half_life_days=decay_half_life_days
-        )
+        config = RobustTrainConfig(purge_periods=purge_periods)
         
         robust_trainer = RobustTrainer(config)
         
@@ -153,29 +145,21 @@ class SignalClassifierTrainer:
         df: pd.DataFrame, 
         feature_cols: List[str], 
         target_col: str,
-        purge_periods: int = 5,
-        use_time_decay: bool = True,
-        decay_half_life_days: int = 90
+        purge_periods: int = 5
     ) -> dict:
         """
-        使用稳健训练方法 (Purged CV + 样本加权)
+        使用稳健训练方法 (Purged CV)
         
         Args:
             df: 训练数据
             feature_cols: 特征列
             target_col: 目标列
             purge_periods: 样本清除周期数 (防止信息泄露)
-            use_time_decay: 是否使用时间衰减权重
-            decay_half_life_days: 时间衰减半衰期 (天)
             
         Returns:
             训练结果字典 (包含 cv_scores, mean_f1, std_f1)
         """
-        config = RobustTrainConfig(
-            purge_periods=purge_periods,
-            use_time_decay=use_time_decay,
-            decay_half_life_days=decay_half_life_days
-        )
+        config = RobustTrainConfig(purge_periods=purge_periods)
         
         robust_trainer = RobustTrainer(config)
         self.model, results = robust_trainer.train_classifier(

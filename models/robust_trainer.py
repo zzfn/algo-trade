@@ -20,18 +20,21 @@ warnings.filterwarnings('ignore')
 @dataclass
 class RobustTrainConfig:
     """稳健训练配置"""
-    # Purged CV 配置
+    # Purged CV 配置 (必须保留 - 防止信息泄露)
     n_splits: int = 5             # 交叉验证折数
     purge_periods: int = 5        # 清除的周期数 (防止前瞻偏差)
     embargo_periods: int = 3      # 禁止使用的周期数
     
     # 样本加权配置
-    use_time_decay: bool = True   # 是否启用时间衰减
+    # 注: 对于 SMC/价格行为策略，时间衰减通常不需要
+    # 因为市场结构模式 (订单块、流动性猎杀) 相对稳定
+    use_time_decay: bool = False  # 默认关闭时间衰减
     decay_half_life_days: int = 90  # 半衰期 (天)
     
-    use_return_weight: bool = True  # 是否启用回报加权
+    use_return_weight: bool = False  # 默认关闭回报加权
     extreme_quantile: float = 0.9   # 极端回报分位数
     extreme_boost: float = 1.5      # 极端样本权重倍数
+
 
 
 class RobustTrainer:
