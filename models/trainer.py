@@ -2,78 +2,67 @@ import lightgbm as lgb
 import joblib
 import pandas as pd
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import optuna
 import json
 from pathlib import Path
+
+# 导入稳健训练模块
+from models.robust_trainer import RobustTrainer, RobustTrainConfig
+
 
 class RankingModelTrainer:
     def __init__(self, model_name: str = "Mag7_Ranker"):
         self.model_name = model_name
         self.model = None
 
-    def train(self, df: pd.DataFrame, feature_cols: List[str], target_col: str) -> None:
+    def train(
+        self, 
+        df: pd.DataFrame, 
+        feature_cols: List[str], 
+        target_col: str,
+        purge_periods: int = 5,
+        use_time_decay: bool = True,
+        decay_half_life_days: int = 90
+    ) -> dict:
         """
-        使用 LightGBM Ranker (LambdaRank) 进行模型训练。
-        数据需要按 timestamp 排序，以便正确计算 group。
+        使用稳健训练方法 (Purged CV + 样本加权)
+        
+        Args:
+            df: 训练数据
+            feature_cols: 特征列
+            target_col: 目标列
+            purge_periods: 样本清除周期数 (防止信息泄露)
+            use_time_decay: 是否使用时间衰减权重
+            decay_half_life_days: 时间衰减半衰期 (天)
+            
+        Returns:
+            训练结果字典 (包含 cv_scores, mean_ndcg, std_ndcg)
         """
-        # 1. 确保按时间排序
-        df = df.sort_values('timestamp')
+        config = RobustTrainConfig(
+            purge_periods=purge_periods,
+            use_time_decay=use_time_decay,
+            decay_half_life_days=decay_half_life_days
+        )
         
-        # 2. 计算分组 (每秒/每个时间点有多少个标的)
-        groups = df.groupby('timestamp').size().tolist()
+        robust_trainer = RobustTrainer(config)
         
-        # 3. 准备数据
-        X = df[feature_cols]
-        y = df[target_col]
-        
-        # 4. 时间序列划分 (80% 训练, 20% 测试)
-        split_idx = int(len(groups) * 0.8)
-        train_groups = groups[:split_idx]
-        test_groups = groups[split_idx:]
-        
-        train_size = sum(train_groups)
-        
-        X_train, X_test = X.iloc[:train_size], X.iloc[train_size:]
-        y_train, y_test = y.iloc[:train_size], y.iloc[train_size:]
-        
-        print(f"正在训练排序模型... 总组数: {len(groups)}, 训练组数: {len(train_groups)}, 测试组数: {len(test_groups)}")
-        
-        # 尝试加载优化后的参数
-        params = {
-            "objective": "lambdarank",
-            "metric": "ndcg",
-            "num_leaves": 31,
-            "learning_rate": 0.05,
-            "n_estimators": 100,
-            "subsample": 0.8,         # 默认值
-            "colsample_bytree": 0.8,  # 默认值
-            "importance_type": 'gain',
-            "random_state": 42,
-            "verbosity": -1
-        }
-        
+        # 加载优化后的超参数
         best_params = self._load_best_params()
+        model_params = None
         if best_params:
             print(f"✨ 使用优化后的参数: {best_params}")
-            params.update(best_params)
+            model_params = best_params
         
-        # 5. 模型配置
-        self.model = lgb.LGBMRanker(
-            **params,
-            label_gain=np.arange(max(y) + 1).tolist() # 针对打分的增益设置
+        self.model, results = robust_trainer.train_ranker(
+            df, feature_cols, target_col, model_params=model_params
         )
         
-        # 6. 执行训练
-        self.model.fit(
-            X_train, y_train,
-            group=train_groups,
-            eval_set=[(X_test, y_test)],
-            eval_group=[test_groups],
-            eval_at=[1, 3] # 关注前 1 名和前 3 名的排序情况
-        )
-        
-        print("模型训练完成。")
+        return results
+    
+    # 保留别名以兼容旧代码
+    train_robust = train
+
 
     def save(self, path: str) -> None:
         if self.model:
@@ -159,39 +148,44 @@ class SignalClassifierTrainer:
         self.model_name = model_name
         self.model = None
 
-    def train(self, df: pd.DataFrame, feature_cols: List[str], target_col: str) -> None:
+    def train(
+        self, 
+        df: pd.DataFrame, 
+        feature_cols: List[str], 
+        target_col: str,
+        purge_periods: int = 5,
+        use_time_decay: bool = True,
+        decay_half_life_days: int = 90
+    ) -> dict:
         """
-        使用 LightGBM Classifier 进行二分类训练。
+        使用稳健训练方法 (Purged CV + 样本加权)
+        
+        Args:
+            df: 训练数据
+            feature_cols: 特征列
+            target_col: 目标列
+            purge_periods: 样本清除周期数 (防止信息泄露)
+            use_time_decay: 是否使用时间衰减权重
+            decay_half_life_days: 时间衰减半衰期 (天)
+            
+        Returns:
+            训练结果字典 (包含 cv_scores, mean_f1, std_f1)
         """
-        # 1. 准备数据
-        X = df[feature_cols]
-        y = df[target_col]
-        
-        # 2. 时间序列划分 (按行，因为现在不需要 group)
-        split_idx = int(len(df) * 0.8)
-        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-        
-        print(f"正在训练信号分类模型... 总样本: {len(df)}, 训练样本: {len(X_train)}, 测试样本: {len(X_test)}")
-        print(f"信号分布: \n{y_train.value_counts(normalize=True)}")
-        
-        # 3. 模型配置
-        self.model = lgb.LGBMClassifier(
-            objective="multiclass",
-            num_class=3,
-            metric="multi_logloss",
-            num_leaves=31,
-            learning_rate=0.05,
-            n_estimators=200,
-            random_state=42,
-            verbosity=-1
+        config = RobustTrainConfig(
+            purge_periods=purge_periods,
+            use_time_decay=use_time_decay,
+            decay_half_life_days=decay_half_life_days
         )
         
-        # 4. 执行训练
-        self.model.fit(
-            X_train, y_train,
-            eval_set=[(X_test, y_test)]
+        robust_trainer = RobustTrainer(config)
+        self.model, results = robust_trainer.train_classifier(
+            df, feature_cols, target_col
         )
+        
+        return results
+    
+    # 保留别名以兼容旧代码
+    train_robust = train
 
     def save(self, path: str) -> None:
         if self.model:
