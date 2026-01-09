@@ -1,10 +1,11 @@
+# -*- coding: utf-8 -*-
 import pandas as pd
 from datetime import datetime, timedelta
 from data.provider import DataProvider
 from features.technical import FeatureBuilder
 from models.trainer import RiskModelTrainer
 from models.constants import get_feature_columns, L2_SYMBOLS
-from alpaca.data.timeframe import TimeFrame
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 
 def train_l4_model():
@@ -45,11 +46,11 @@ def train_l4_model():
     print("Step 2: Fetching L4 technical data...")
     print("=" * 60)
     
-    start_date = end_date - timedelta(days=365)
+    start_date = end_date - timedelta(days=90) # 5min 数据量大，回溯 90 天
     symbols = L2_SYMBOLS
-    print(f"  Fetching data for {len(symbols)} stocks...")
+    print(f"  Fetching 5min data for {len(symbols)} stocks...")
     
-    df_raw = provider.fetch_bars(symbols, TimeFrame.Hour, start_date, end_date)
+    df_raw = provider.fetch_bars(symbols, TimeFrame(5, TimeFrameUnit.Minute), start_date, end_date)
     print(f"  Raw data rows: {len(df_raw)}")
     
     # 3. 构建技术特征
@@ -77,7 +78,8 @@ def train_l4_model():
     print("Step 5: Adding return targets...")
     print("=" * 60)
     
-    df = builder.add_return_target(df, horizon=5)
+    # 预测未来 1 小时收益 (5min * 12)
+    df = builder.add_return_target(df, horizon=12)
     
     # 预处理已在 add_all_features 中完成,这里手动删除 NaN
     df = df.dropna()

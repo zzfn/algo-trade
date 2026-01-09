@@ -5,7 +5,7 @@ import numpy as np
 
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
-from alpaca.data.timeframe import TimeFrame
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from models.engine import StrategyEngine
 from models.constants import L2_SYMBOLS, L2_LOOKBACK_DAYS, get_feature_columns
 from utils.logger import setup_logger
@@ -28,7 +28,7 @@ def run_l2_backtest(days=90, top_n=3):
     # ✅ 批量获取所有 L2 标的数据 (一次性查询)
     df_all = engine.provider.fetch_bars(
         L2_SYMBOLS,  # 批量查询列表
-        TimeFrame.Hour, 
+        TimeFrame(5, TimeFrameUnit.Minute), 
         fetch_start, 
         end_date,
         use_redis=True  # 启用 Redis 缓存

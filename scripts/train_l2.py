@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import pandas as pd
 from datetime import datetime, timedelta
 from data.provider import DataProvider
@@ -13,20 +14,21 @@ def train_l2_model():
     provider = DataProvider()
     builder = FeatureBuilder()
     
-    # 1. 获取数据
-    end_date = datetime(2024, 12, 31)
-    start_date = end_date - timedelta(days=365)
+    # 1. 获取数据 (5min 频率)
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=90) # 5min 数据量大，先回溯 90 天
     
     symbols = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'AVGO', 'MU', 'AMD', 'ORCL', 'INTC']
-    print(f"Fetching data for {len(symbols)} stocks...")
+    print(f"Fetching 5min data for {len(symbols)} stocks...")
     
-    df_raw = provider.fetch_bars(symbols, TimeFrame(15, TimeFrameUnit.Minute), start_date, end_date)
+    df_raw = provider.fetch_bars(symbols, TimeFrame(5, TimeFrameUnit.Minute), start_date, end_date)
     print(f"Raw data rows: {len(df_raw)}")
     
     # 2. 构建特征
     print("Building features...")
     df = builder.add_all_features(df_raw, is_training=True)
-    df = builder.add_rank_target(df, horizon=4)
+    # 设置 1 小时后的排名 (5min * 12)
+    df = builder.add_rank_target(df, horizon=12)
     
     feature_cols = get_feature_columns(df)
     print(f"Training with {len(feature_cols)} features.")

@@ -75,9 +75,9 @@ class StrategyEngine:
             results['l1_safe'] = prob > L1_SAFE_THRESHOLD
             results['l1_prob'] = prob
 
-        # --- L2: Stock Selection (15min) ---
+        # --- L2: Stock Selection (5min) ---
         l2_start = target_dt - timedelta(days=L2_LOOKBACK_DAYS)
-        df_l2_raw = self.provider.fetch_bars(self.l2_symbols, TimeFrame(15, TimeFrameUnit.Minute), l2_start, target_dt + timedelta(days=1), use_redis=True)
+        df_l2_raw = self.provider.fetch_bars(self.l2_symbols, TimeFrame(5, TimeFrameUnit.Minute), l2_start, target_dt + timedelta(days=1), use_redis=True)
         df_l2_feats = self.l2_builder.add_all_features(df_l2_raw, is_training=False)
         
         l2_valid = df_l2_feats[df_l2_feats['timestamp'] <= target_dt]
@@ -99,10 +99,10 @@ class StrategyEngine:
         results['l2_ranked'] = l2_latest.sort_values('rank_score', ascending=False)
         results['l2_timestamp'] = last_h_ts
 
-        # --- L3: Trend Confirmation ---
+        # --- L3: Trend Confirmation (5min) ---
         all_l2_symbols = l2_latest['symbol'].tolist()
         l3_start = target_dt - timedelta(days=L3_LOOKBACK_DAYS)
-        df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame.Minute, l3_start, target_dt + timedelta(days=1), use_redis=True)
+        df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame(5, TimeFrameUnit.Minute), l3_start, target_dt + timedelta(days=1), use_redis=True)
         df_l3_feats = self.l2_builder.add_all_features(df_l3_raw, is_training=False)
         
         l3_valid = df_l3_feats[df_l3_feats['timestamp'] <= target_dt]
