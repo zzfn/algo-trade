@@ -174,8 +174,18 @@ def run_l3_backtest_vbt(symbol, days=30, cash=10000.0):
     
     # 保存报告
     report_path = f"reports/backtest_l3_{symbol}.html"
+    csv_path = f"reports/backtest_l3_{symbol}_trades.csv"
+    
     Path(report_path).parent.mkdir(parents=True, exist_ok=True)
+    
+    # 1. 保存 HTML 图表
     portfolio.plot().write_html(report_path)
+    
+    # 2. 保存交易细节 CSV
+    if not trades.empty:
+        trades.to_csv(csv_path, index=False)
+        logger.info(f"📊 交易细节已保存至: {csv_path}")
+        
     logger.info(f"📈 VBT 报告已保存至: {report_path}")
 
 if __name__ == "__main__":

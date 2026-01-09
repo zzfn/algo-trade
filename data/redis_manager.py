@@ -133,4 +133,6 @@ class RedisDataManager:
             data_list.append(data)
             
         df = pd.DataFrame(data_list)
+        if not df.empty:
+            df = df.drop_duplicates(subset=['timestamp'], keep='last')
         return df

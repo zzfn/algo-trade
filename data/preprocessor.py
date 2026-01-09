@@ -62,6 +62,12 @@ class DataPreprocessor:
             logger.warning("  ⚠️  数据中没有 symbol 列,跳过时间对齐")
             return df
         
+        # 确保每个 symbol 内部没有重复时间戳,防止 reindex 报错
+        if df.duplicated(subset=['symbol', 'timestamp']).any():
+            dup_count = df.duplicated(subset=['symbol', 'timestamp']).sum()
+            logger.warning(f"  ⚠️  检测到 {dup_count} 行重复 (symbol, timestamp) 数据,正在去重...")
+            df = df.drop_duplicates(subset=['symbol', 'timestamp'], keep='last')
+        
         # 获取所有时间戳的并集
         all_timestamps = df['timestamp'].unique()
         all_timestamps = pd.Series(all_timestamps).sort_values().values
