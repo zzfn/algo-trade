@@ -129,17 +129,26 @@ class StrategyEngine:
             results['l3_signals'] = l3_latest
             results['l3_timestamp'] = last_ts
             
-            # --- Freshness Check ---
+            # --- Freshness Check (Per Symbol) ---
             # 更新: 改为 75 分钟 (1H 数据 + 15分钟缓冲)
             # 因为使用的是 Hourly Bar, 且 Timestamp 是 Bar Start Time
             # 例如 10:05 运行时, 最新已完成 Bar 是 09:00 (覆盖 09:00-10:00)
             # 此时 lag = 1h 05m = 65m > 60m.
-            time_lag = target_dt - last_ts
-            if time_lag > timedelta(minutes=75):
-                logger.warning(f"⚠️  Data Stale Warning: Latest data is from {last_ts}, lag is {time_lag}. Skipping trading.")
+            stale_symbols = []
+            lagging_symbols = []
+            for sym in l3_latest['symbol'].unique():
+                sym_ts = l3_latest[l3_latest['symbol'] == sym]['timestamp'].max()
+                sym_lag = target_dt - sym_ts
+                if sym_lag > timedelta(minutes=75):
+                    stale_symbols.append(f"{sym}({sym_ts.strftime('%H:%M')}, lag={sym_lag})")
+                elif sym_lag > timedelta(minutes=65):
+                    lagging_symbols.append(f"{sym}({sym_ts.strftime('%H:%M')}, lag={sym_lag})")
+            
+            if stale_symbols:
+                logger.warning(f"⚠️  Data Stale Warning: {len(stale_symbols)} symbols have stale data: {', '.join(stale_symbols)}. Skipping trading.")
                 results['l3_signals'] = pd.DataFrame() # Clear signals to prevent trading
-            elif time_lag > timedelta(minutes=65):
-                 logger.warning(f"⚠️  Data Lag Warning: Latest data is from {last_ts}, lag is {time_lag}.")
+            elif lagging_symbols:
+                logger.warning(f"⚠️  Data Lag Warning: {len(lagging_symbols)} symbols lagging: {', '.join(lagging_symbols)}.")
 
         return results
 
