@@ -106,7 +106,8 @@ def run_backtest(entries, exits, close_prices, init_cash=100000, fees=0.001):
         init_cash=init_cash,
         fees=fees,
         slippage=0.001,  # 0.1% 滑点
-        freq='1min'
+        freq='1min',
+        group_by=True    # 聚合所有标的为一个投资组合
     )
     
     return portfolio
@@ -122,8 +123,18 @@ def print_stats(portfolio):
     print(f"年化收益率:      {stats.get('Annual Return [%]', 0):.2f}%")
     print(f"夏普比率:        {stats.get('Sharpe Ratio', 0):.2f}")
     print(f"最大回撤:        {stats['Max Drawdown [%]']:.2f}%")
-    print(f"胜率:            {stats.get('Win Rate [%]', 0):.2f}%")
-    print(f"总交易次数:      {stats['Total Trades']}")
+    
+    # Win Rate handling
+    win_rate = stats.get('Win Rate [%]', 0)
+    win_rate_str = "N/A" if pd.isna(win_rate) else f"{win_rate:.2f}%"
+    print(f"胜率:            {win_rate_str}")
+    
+    # Trade counts
+    total_trades = stats['Total Trades']
+    closed_trades = stats.get('Total Closed Trades', 0)
+    open_trades = stats.get('Total Open Trades', 0)
+    
+    print(f"总交易次数:      {total_trades} (Open: {open_trades}, Closed: {closed_trades})")
     print(f"="*60)
     
     return stats
