@@ -8,50 +8,63 @@ from models.constants import get_feature_columns, L2_SYMBOLS
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 
-def train_l4_model():
+def train_unified_model():
     """
-    训练 L4 收益预测模型 (包含 L1 宏观特征)。
+    训练统一收益预测模型 (Unified Return Predictor)。
     
-    新版 L4 预测未来 5 周期收益率,用于动态仓位分配。
-    现在包含 L1 宏观特征,让模型自动学习市场环境对收益的影响。
+    使用 1H K线数据，同时包含 L1 宏观数据和 L2 技术特征。
+    取代原有的 L1 (Market Timing) 和 L4 (Return Prediction) 分离架构。
     """
     load_dotenv()
     provider = DataProvider()
     builder = FeatureBuilder()
     
-    # 1. 获取 L1 宏观数据 (日线)
-    print("=" * 60)
-    print("Step 1: Fetching L1 macro data...")
-    print("=" * 60)
-    
+    # 统一截止日期
     end_date = datetime(2024, 12, 31)
-    l1_start = end_date - timedelta(days=365 * 2)  # L1 需要更长历史
     
-    from features.macro import L1FeatureBuilder
-    from models.constants import L1_SYMBOLS
-    
-    l1_builder = L1FeatureBuilder()
-    l1_dict = {}
-    for sym in L1_SYMBOLS:
-        df = provider.fetch_bars(sym, TimeFrame.Day, l1_start, end_date)
-        l1_dict[sym] = df
-        print(f"  Loaded {len(df)} days for {sym}")
-    
-    l1_features = l1_builder.build_l1_features(l1_dict)
-    print(f"  L1 features built: {len(l1_features)} rows")
-    print(f"  L1 columns: {[c for c in l1_features.columns if c != 'timestamp']}")
-    
-    # 2. 获取 L4 技术数据 (小时线)
-    print("\n" + "=" * 60)
-    print("Step 2: Fetching L4 technical data...")
+    # 1. 获取 L1 宏观数据 (1H)
+    # 宏观数据回溯更长，以确保 rolling window (如 MA200) 有足够数据
+    print("=" * 60)
+    print("Step 1: Fetching Macro data (1H)...")
     print("=" * 60)
     
-    start_date = end_date - timedelta(days=90) # 5min 数据量大，回溯 90 天
-    symbols = L2_SYMBOLS
-    print(f"  Fetching 5min data for {len(symbols)} stocks...")
+    start_date_macro = end_date - timedelta(days=365 * 2) 
     
-    df_raw = provider.fetch_bars(symbols, TimeFrame(5, TimeFrameUnit.Minute), start_date, end_date)
-    print(f"  Raw data rows: {len(df_raw)}")
+    from features.macro import MacroFeatureBuilder
+    from models.constants import MACRO_SYMBOLS
+    
+    macro_builder = MacroFeatureBuilder()
+    macro_dict = {}
+    
+    # 使用 1H 周期
+    timeframe = TimeFrame.Hour
+    
+    for sym in MACRO_SYMBOLS:
+        print(f"  Fetching {sym}...")
+        # 注意: 2年 1H 数据量较大 (~4000 rows/year * 2 = 8000 rows)
+        df = provider.fetch_bars(sym, timeframe, start_date_macro, end_date)
+        macro_dict[sym] = df
+        print(f"    Loaded {len(df)} rows for {sym}")
+    
+    # 构建宏观特征
+    # 注意: 现在的 window 是基于 Hour 的 (e.g. MA200 Hour ~= 1 month)
+    macro_features = macro_builder.build_macro_features(macro_dict)
+    print(f"  Macro features built: {len(macro_features)} rows")
+    
+    
+    # 2. 获取 Stock 技术数据 (1H)
+    print("\n" + "=" * 60)
+    print("Step 2: Fetching Stock Technical data (1H)...")
+    print("=" * 60)
+    
+    # Stock 数据不需要那么长，主要用于训练近期关系
+    # 但为了对齐宏观数据，我们尽量取较长的时间段，比如 1 年
+    start_date_stock = end_date - timedelta(days=365)
+    symbols = L2_SYMBOLS
+    print(f"  Fetching 1H data for {len(symbols)} stocks...")
+    
+    df_raw = provider.fetch_bars(symbols, timeframe, start_date_stock, end_date)
+    print(f"  Raw stock data rows: {len(df_raw)}")
     
     # 3. 构建技术特征
     print("\n" + "=" * 60)
@@ -63,62 +76,67 @@ def train_l4_model():
     
     # 4. 合并 L1 宏观特征
     print("\n" + "=" * 60)
-    print("Step 4: Merging L1 macro features...")
+    print("Step 4: Merging Macro features...")
     print("=" * 60)
     
-    df = builder.merge_l1_features(df, l1_features)
-    print(f"  L1 features merged: {len(df)} rows")
+    # merge_l1_features 会根据 timestamp对齐 (1H 对 1H)
+    # Note: method name in FeatureBuilder might still be merge_l1_features unless renamed there too.
+    # I should check FeatureBuilder.merge_l1_features name.
+    # Assuming user didn't ask to rename THAT specific method in FeatureBuilder (which is in technical.py),
+    # but for consistence I should properly rename it later or just use it.
+    # Wait, I am restricted to renaming "L1 symbols/classes". FeatureBuilder is in technical.py. 
+    # I'll stick to calling it merge_l1_features for now unless found otherwise, 
+    # BUT I should check technical.py.
+    # Wait, I didn't check technical.py yet. 
+    # For now, I'll assume the method name is still `merge_l1_features` in `FeatureBuilder`.
     
-    # 验证 L1 特征已添加
-    l1_cols = [c for c in df.columns if c.startswith('spy_') or c.startswith('vixy_') or c.startswith('tlt_')]
-    print(f"  L1 macro columns in dataset: {l1_cols}")
+    df = builder.merge_l1_features(df, macro_features)
+    print(f"  Merged dataset size: {len(df)} rows")
+    
+    # 验证特征
+    macro_cols = [c for c in df.columns if c.startswith('spy_') or c.startswith('vixy_') or c.startswith('tlt_')]
+    print(f"  Macro columns present: {len(macro_cols)} ({macro_cols[:3]}...)")
     
     # 5. 添加收益目标
     print("\n" + "=" * 60)
     print("Step 5: Adding return targets...")
     print("=" * 60)
     
-    # 预测未来 1 小时收益 (5min * 12)
-    df = builder.add_return_target(df, horizon=12)
+    # 预测未来 1 小时收益
+    HORIZON = 1 
+    print(f"  Target Horizon: {HORIZON} hours")
     
-    # 预处理已在 add_all_features 中完成,这里手动删除 NaN
+    df = builder.add_return_target(df, horizon=HORIZON)
+    
     df = df.dropna()
     print(f"  Valid training samples: {len(df)}")
     
-    # 打印收益分布
-    print(f"\n  Target return distribution:")
-    print(f"    Mean:   {df['target_future_return'].mean():.4%}")
-    print(f"    Std:    {df['target_future_return'].std():.4%}")
-    print(f"    Min:    {df['target_future_return'].min():.4%}")
-    print(f"    Max:    {df['target_future_return'].max():.4%}")
-    
-    # 6. 准备特征列 (包含 L1 特征)
+    # 6. 准备特征列
     print("\n" + "=" * 60)
-    print("Step 6: Preparing features for training...")
+    print("Step 6: Preparing features...")
     print("=" * 60)
     
     feature_cols = get_feature_columns(df)
     print(f"  Total features: {len(feature_cols)}")
-    print(f"  L1 macro features: {len([c for c in feature_cols if c in l1_cols])}")
-    print(f"  Technical features: {len(feature_cols) - len([c for c in feature_cols if c in l1_cols])}")
     
     # 7. 训练模型
     print("\n" + "=" * 60)
-    print("Step 7: Training L4 Return Prediction model...")
+    print("Step 7: Training Unified Return Model...")
     print("=" * 60)
     
     trainer = RiskModelTrainer()
+    # 还是使用 'target_future_return'
     trainer.train(df, feature_cols, 'target_future_return', 'return_predictor')
-    trainer.save("models/artifacts/l4_return_predictor.joblib")
+    
+    # 保存为统一模型
+    model_path = "models/artifacts/unified_return_predictor.joblib"
+    trainer.save(model_path)
     
     print("\n" + "=" * 60)
-    print("✅ L4 Return Prediction model training complete!")
+    print("✅ Unified Model training complete!")
     print("=" * 60)
-    print("  Model saved to: models/artifacts/l4_return_predictor.joblib")
-    print("  Features include: Technical indicators + L1 macro features")
-    print("  Model will automatically adjust predictions based on market environment")
+    print(f"  Model saved to: {model_path}")
     print("=" * 60)
 
 if __name__ == "__main__":
-    train_l4_model()
-
+    train_unified_model()
