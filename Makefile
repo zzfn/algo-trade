@@ -24,10 +24,10 @@ help:
 	@echo "  make clean             - 清理缓存和临时文件"
 	@echo ""
 	@echo "📊 模型训练:"
-	@echo "  make train-l1          - 训练 L1 市场择时模型"
 	@echo "  make train-l2          - 训练 L2 选股排序模型"
+
 	@echo "  make train-l3          - 训练 L3 趋势确认模型"
-	@echo "  make train-l4          - 训练 L4 收益预测模型"
+	@echo "  make train-l4          - 训练 Unified 统一收益模型 (L1+L4)"
 	@echo "  make train-l5          - 训练 L5 元策略模型 ⭐"
 	@echo ""
 	@echo "🔍 超参数优化:"
@@ -39,7 +39,7 @@ help:
 	@echo "  make backtest-vbt      - VectorBT 快速回测 (30天) ⭐"
 	@echo "  make backtest-vbt-full - VectorBT 完整回测 (90天)"
 	@echo "  make backtest          - 传统精细回测 (90天)"
-	@echo "  make backtest-l1       - L1 单层回测 (365天)"
+	@echo "  make backtest          - 传统精细回测 (90天)"
 	@echo "  make backtest-l2       - L2 单层回测 (90天)"
 	@echo "  make backtest-l3       - L3 单层回测 (30天)"
 	@echo "  make backtest-l4       - L4 单层回测 (60天)"
@@ -76,9 +76,6 @@ clean:
 # ============================================================
 # 📊 模型训练
 # ============================================================
-
-train-l1:
-	PYTHONPATH=. uv run python scripts/train_l1.py
 
 train-l2:
 	PYTHONPATH=. uv run python scripts/train_l2.py
@@ -122,9 +119,6 @@ backtest:
 	PYTHONPATH=. uv run python scripts/backtest.py $(if $(tf),$(tf),1h) --days $(if $(days),$(days),90) --top_n 1
 
 # 分层回测
-backtest-l1:
-	PYTHONPATH=. uv run python scripts/backtest_l1.py --days $(if $(days),$(days),365)
-
 backtest-l2:
 	PYTHONPATH=. uv run python scripts/backtest_l2.py --days $(if $(days),$(days),90)
 
