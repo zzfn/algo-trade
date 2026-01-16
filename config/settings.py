@@ -17,11 +17,12 @@ try:
     _params = get_dynamic_params()
     SIGNAL_THRESHOLD = _params['signal_threshold']  # L5 动态优化 ⭐
     TOP_N_TRADES = _params['top_n_trades']          # L5 动态优化 ⭐
-    # L1_RISK_FACTOR Removed
+    L1_RISK_FACTOR = _params['l1_risk_factor']      # L5 动态优化 ⭐
 except:
     # 回退到默认值
     SIGNAL_THRESHOLD = 0.517
     TOP_N_TRADES = 2
+    L1_RISK_FACTOR = 0.633
 
 # --- 时间窗口 (天数) ---
 L1_LOOKBACK_DAYS = 300       # L1 市场择时回溯天数
