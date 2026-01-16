@@ -3,11 +3,11 @@
 # ============================================================
 
 .PHONY: help setup clean
-.PHONY: train-l1 train-l2 train-l3 train-l4 train-l5
+.PHONY: train-l2 train-l3 train-return train-l5
 .PHONY: optimize-l2 optimize-l3 optimize-all
-.PHONY: backtest backtest-l1 backtest-l2 backtest-l3 backtest-l4
+.PHONY: backtest-l2 backtest-l3 backtest-l4
 .PHONY: backtest-vbt backtest-vbt-full
-.PHONY: predict trade run dashboard
+.PHONY: run
 .PHONY: generate-meta-data inspect-models
 
 # ============================================================
@@ -27,7 +27,7 @@ help:
 	@echo "  make train-l2          - 训练 L2 选股排序模型"
 
 	@echo "  make train-l3          - 训练 L3 趋势确认模型"
-	@echo "  make train-l4          - 训练 Unified 统一收益模型 (L1+L4)"
+	@echo "  make train-return      - 训练收益预测模型"
 	@echo "  make train-l5          - 训练 L5 元策略模型 ⭐"
 	@echo ""
 	@echo "🔍 超参数优化:"
@@ -38,17 +38,12 @@ help:
 	@echo "📈 策略回测:"
 	@echo "  make backtest-vbt      - VectorBT 快速回测 (30天) ⭐"
 	@echo "  make backtest-vbt-full - VectorBT 完整回测 (90天)"
-	@echo "  make backtest          - 传统精细回测 (90天)"
-	@echo "  make backtest          - 传统精细回测 (90天)"
 	@echo "  make backtest-l2       - L2 单层回测 (90天)"
 	@echo "  make backtest-l3       - L3 单层回测 (30天)"
 	@echo "  make backtest-l4       - L4 单层回测 (60天)"
 	@echo ""
 	@echo "🤖 实时交易:"
-	@echo "  make predict           - 运行实时预测"
-	@echo "  make trade             - 启动自动交易机器人"
-	@echo "  make run               - 启动完整系统 (机器人 + Dashboard)"
-	@echo "  make dashboard         - 启动 Web Dashboard"
+	@echo "  make run               - 启动完整系统"
 	@echo ""
 	@echo "🛠️  工具命令:"
 	@echo "  make inspect-models    - 分析模型特征重要性"
@@ -83,7 +78,7 @@ train-l2:
 train-l3:
 	PYTHONPATH=. uv run python scripts/train_l3.py
 
-train-l4:
+train-return:
 	PYTHONPATH=. uv run python scripts/train_l4.py
 
 train-l5:
@@ -114,10 +109,6 @@ backtest-vbt:
 backtest-vbt-full:
 	PYTHONPATH=. uv run python scripts/backtest_vbt.py --days 90 --cash 100000
 
-# 传统回测 (精细 - 用于验证)
-backtest:
-	PYTHONPATH=. uv run python scripts/backtest.py $(if $(tf),$(tf),1h) --days $(if $(days),$(days),90) --top_n 1
-
 # 分层回测
 backtest-l2:
 	PYTHONPATH=. uv run python scripts/backtest_l2.py --days $(if $(days),$(days),90)
@@ -132,20 +123,9 @@ backtest-l4:
 # 🤖 实时交易
 # ============================================================
 
-predict:
-	PYTHONPATH=. uv run python predict.py $(args)
-
-trade:
-	PYTHONPATH=. uv run python trade.py $(args)
-
 run:
 	@echo "🚀 启动完整交易系统..."
 	PYTHONPATH=. uv run python main.py
-
-dashboard:
-	@echo "🚀 启动 Dashboard 服务器..."
-	@echo "📊 访问地址: http://localhost:8000"
-	PYTHONPATH=. uv run uvicorn web.server:app --host 0.0.0.0 --port 8000 --reload
 
 # ============================================================
 # 🛠️  工具命令

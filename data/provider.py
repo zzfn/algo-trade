@@ -264,6 +264,69 @@ class DataProvider:
             
         return df
 
+    def resample_bars(self, df: pd.DataFrame, target_tf: str) -> pd.DataFrame:
+        """
+        将分钟级数据聚合为目标时间框架。
+        
+        Args:
+            df: 包含 OHLCV 数据的 DataFrame，必须包含 'timestamp' 和 'symbol' 列
+            target_tf: 目标时间框架字符串，如 '1H', '1D', '15T' (T=分钟)
+            
+        Returns:
+            聚合后的 DataFrame
+        """
+        if df.empty:
+            logger.warning(f"⚠️ resample_bars: 输入 df 为空")
+            return df
+        
+        logger.debug(f"🔄 resample_bars: 输入 {len(df)} 行, 目标 {target_tf}")
+        logger.debug(f"   symbols: {df['symbol'].unique().tolist() if 'symbol' in df.columns else 'N/A'}")
+            
+        # 确保 timestamp 是 datetime 类型
+        if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+        
+        # OHLCV 聚合规则
+        agg_rules = {
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last',
+            'volume': 'sum',
+        }
+        
+        # 可选字段
+        if 'vwap' in df.columns:
+            agg_rules['vwap'] = 'last'
+        if 'trade_count' in df.columns:
+            agg_rules['trade_count'] = 'sum'
+        
+        # 按 symbol 分组聚合
+        result_dfs = []
+        for symbol, group in df.groupby('symbol'):
+            group = group.set_index('timestamp').sort_index()
+            
+            # 使用 pandas resample 聚合
+            # 注意: label='left' 表示使用区间起始时间作为标签 (与 Alpaca 一致)
+            resampled = group.resample(target_tf, label='left').agg(agg_rules)
+            
+            # 移除空行 (没有数据的时间段)
+            resampled = resampled.dropna(subset=['close'])
+            
+            logger.debug(f"   {symbol}: {len(group)} -> {len(resampled)} rows after resample")
+            
+            resampled = resampled.reset_index()
+            resampled['symbol'] = symbol
+            result_dfs.append(resampled)
+        
+        if result_dfs:
+            result = pd.concat(result_dfs, ignore_index=True)
+            logger.debug(f"✅ resample_bars: 输出 {len(result)} 行")
+            return result
+        else:
+            logger.warning(f"⚠️ resample_bars: 没有任何数据可聚合")
+            return pd.DataFrame()
+
 if __name__ == "__main__":
     # Example usage (will fail if keys not set)
     try:

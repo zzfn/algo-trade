@@ -12,7 +12,7 @@ def train_unified_model():
     """
     训练统一收益预测模型 (Unified Return Predictor)。
     
-    使用 1H K线数据，同时包含 L1 宏观数据和 L2 技术特征。
+    使用 1min K线数据 (resample to 1H)，同时包含 Macro 宏观数据和 L2 技术特征。
     取代原有的 L1 (Market Timing) 和 L4 (Return Prediction) 分离架构。
     """
     load_dotenv()
@@ -22,10 +22,10 @@ def train_unified_model():
     # 统一截止日期
     end_date = datetime(2024, 12, 31)
     
-    # 1. 获取 L1 宏观数据 (1H)
+    # 1. 获取 Macro 宏观数据 (1min -> resample to 1H)
     # 宏观数据回溯更长，以确保 rolling window (如 MA200) 有足够数据
     print("=" * 60)
-    print("Step 1: Fetching Macro data (1H)...")
+    print("Step 1: Fetching Macro data (1min -> resample to 1H)...")
     print("=" * 60)
     
     start_date_macro = end_date - timedelta(days=365 * 2) 
@@ -36,15 +36,13 @@ def train_unified_model():
     macro_builder = MacroFeatureBuilder()
     macro_dict = {}
     
-    # 使用 1H 周期
-    timeframe = TimeFrame.Hour
-    
     for sym in MACRO_SYMBOLS:
         print(f"  Fetching {sym}...")
-        # 注意: 2年 1H 数据量较大 (~4000 rows/year * 2 = 8000 rows)
-        df = provider.fetch_bars(sym, timeframe, start_date_macro, end_date)
+        # 使用 1min 数据并 resample 到 1H
+        df_min = provider.fetch_bars(sym, TimeFrame.Minute, start_date_macro, end_date)
+        df = provider.resample_bars(df_min, '1H')
         macro_dict[sym] = df
-        print(f"    Loaded {len(df)} rows for {sym}")
+        print(f"    Loaded {len(df)} rows for {sym} (resampled to 1H)")
     
     # 构建宏观特征
     # 注意: 现在的 window 是基于 Hour 的 (e.g. MA200 Hour ~= 1 month)
@@ -52,19 +50,20 @@ def train_unified_model():
     print(f"  Macro features built: {len(macro_features)} rows")
     
     
-    # 2. 获取 Stock 技术数据 (1H)
+    # 2. 获取 Stock 技术数据 (1min -> resample to 1H)
     print("\n" + "=" * 60)
-    print("Step 2: Fetching Stock Technical data (1H)...")
+    print("Step 2: Fetching Stock Technical data (1min -> resample to 1H)...")
     print("=" * 60)
     
     # Stock 数据不需要那么长，主要用于训练近期关系
     # 但为了对齐宏观数据，我们尽量取较长的时间段，比如 1 年
     start_date_stock = end_date - timedelta(days=365)
     symbols = L2_SYMBOLS
-    print(f"  Fetching 1H data for {len(symbols)} stocks...")
+    print(f"  Fetching 1min data for {len(symbols)} stocks...")
     
-    df_raw = provider.fetch_bars(symbols, timeframe, start_date_stock, end_date)
-    print(f"  Raw stock data rows: {len(df_raw)}")
+    df_raw_min = provider.fetch_bars(symbols, TimeFrame.Minute, start_date_stock, end_date)
+    df_raw = provider.resample_bars(df_raw_min, '1H')
+    print(f"  Raw stock data rows: {len(df_raw)} (resampled to 1H)")
     
     # 3. 构建技术特征
     print("\n" + "=" * 60)

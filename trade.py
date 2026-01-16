@@ -135,9 +135,10 @@ class TradingBot:
         
         # 3. 获取实时市场特征并预测 L5 参数
         try:
-            # 获取最近 30 天的 SPY 数据
+            # 获取最近 30 天的 SPY 数据 (1min -> resample to 1D)
             spy_start = target_dt - timedelta(days=45)
-            spy_data = self.engine.provider.fetch_bars(['SPY'], TimeFrame.Day, spy_start, target_dt, use_redis=True)
+            spy_data_min = self.engine.provider.fetch_bars(['SPY'], TimeFrame.Minute, spy_start, target_dt, use_redis=True)
+            spy_data = self.engine.provider.resample_bars(spy_data_min, '1D')
             
             if not spy_data.empty:
                 # 计算市场特征

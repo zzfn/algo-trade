@@ -49,14 +49,16 @@ class StrategyEngine:
         # --- Macro: Market Timing (Data Only) ---
         macro_start = target_dt - timedelta(days=L1_LOOKBACK_DAYS)
         
-        # ✅ 批量获取所有市场指标数据 (1H)
-        df_macro_all = self.provider.fetch_bars(
+        # ✅ 批量获取所有市场指标数据 (1min -> resample to 1H)
+        # 注意: Macro 需要 300 天历史数据，不适合用 Redis 增量模式，直接从 API/缓存获取
+        df_macro_raw = self.provider.fetch_bars(
             self.macro_symbols,  # ['SPY', 'VIXY', 'TLT']
-            TimeFrame.Hour,   # Unified to 1H
+            TimeFrame.Minute,   # 统一使用分钟数据
             macro_start, 
             target_dt + timedelta(days=1), 
-            use_redis=True
+            use_redis=False  # 使用文件缓存而非 Redis
         )
+        df_macro_all = self.provider.resample_bars(df_macro_raw, '1H')
         
         # 按标的分组
         df_macro_dict = {}
@@ -76,11 +78,11 @@ class StrategyEngine:
         if df_macro_feats.empty:
             logger.warning("Macro features empty!")
 
-        # --- L2: Stock Selection (5min) ---
-        # --- L2: Stock Selection (1H) ---
+        # --- L2: Stock Selection (1min -> resample to 1H) ---
         l2_start = target_dt - timedelta(days=L2_LOOKBACK_DAYS)
-        # Fetch 1H data
-        df_l2_raw = self.provider.fetch_bars(self.l2_symbols, TimeFrame.Hour, l2_start, target_dt + timedelta(days=1), use_redis=True)
+        # Fetch 1min data and resample to 1H
+        df_l2_raw_min = self.provider.fetch_bars(self.l2_symbols, TimeFrame.Minute, l2_start, target_dt + timedelta(days=1), use_redis=True)
+        df_l2_raw = self.provider.resample_bars(df_l2_raw_min, '1H')
         df_l2_feats = self.l2_builder.add_all_features(df_l2_raw, is_training=False)
         
         l2_valid = df_l2_feats[df_l2_feats['timestamp'] <= target_dt]
@@ -102,11 +104,11 @@ class StrategyEngine:
         results['l2_ranked'] = l2_latest.sort_values('rank_score', ascending=False)
         results['l2_timestamp'] = last_h_ts
 
-        # --- L3: Trend Confirmation (1H) ---
+        # --- L3: Trend Confirmation (1min) ---
         all_l2_symbols = l2_latest['symbol'].tolist()
         l3_start = target_dt - timedelta(days=L3_LOOKBACK_DAYS)
-        # Fetch 1H data
-        df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame.Hour, l3_start, target_dt + timedelta(days=1), use_redis=True)
+        # Fetch 1min data (实时数据由 streamer 写入 Redis)
+        df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame.Minute, l3_start, target_dt + timedelta(days=1), use_redis=True)
         df_l3_feats = self.l2_builder.add_all_features(df_l3_raw, is_training=False)
         
         l3_valid = df_l3_feats[df_l3_feats['timestamp'] <= target_dt]
@@ -130,18 +132,15 @@ class StrategyEngine:
             results['l3_timestamp'] = last_ts
             
             # --- Freshness Check (Per Symbol) ---
-            # 更新: 改为 75 分钟 (1H 数据 + 15分钟缓冲)
-            # 因为使用的是 Hourly Bar, 且 Timestamp 是 Bar Start Time
-            # 例如 10:05 运行时, 最新已完成 Bar 是 09:00 (覆盖 09:00-10:00)
-            # 此时 lag = 1h 05m = 65m > 60m.
+            # 分钟级数据: 超过 5 分钟视为 stale, 超过 3 分钟发出警告
             stale_symbols = []
             lagging_symbols = []
             for sym in l3_latest['symbol'].unique():
                 sym_ts = l3_latest[l3_latest['symbol'] == sym]['timestamp'].max()
                 sym_lag = target_dt - sym_ts
-                if sym_lag > timedelta(minutes=75):
+                if sym_lag > timedelta(minutes=5):
                     stale_symbols.append(f"{sym}({sym_ts.strftime('%H:%M')}, lag={sym_lag})")
-                elif sym_lag > timedelta(minutes=65):
+                elif sym_lag > timedelta(minutes=3):
                     lagging_symbols.append(f"{sym}({sym_ts.strftime('%H:%M')}, lag={sym_lag})")
             
             if stale_symbols:

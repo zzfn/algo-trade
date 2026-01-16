@@ -34,8 +34,9 @@ class MarketDataStreamer:
         # 显式指定 feed='iex' 用于免费数据或测试，生产环境如有权限可用 'sip'
         self.stream_client = StockDataStream(self.api_key, self.secret_key, feed=DataFeed.IEX)
         
-        # 订阅列表
-        self.symbols = L2_SYMBOLS
+        # 订阅列表 (L2 交易标的 + Macro 宏观标的)
+        from config.settings import MACRO_SYMBOLS
+        self.symbols = list(set(L2_SYMBOLS + MACRO_SYMBOLS))  # 去重合并
         logger.info(f"📋 订阅标的 ({len(self.symbols)}): {self.symbols}")
 
     async def bar_handler(self, bar):
