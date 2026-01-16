@@ -36,7 +36,7 @@ def optimize_l3():
     best_params = trainer.optimize(df, feature_cols, 'target_signal', n_trials=50)
     
     # 保存最佳参数
-    params_file = Path('models/best_params.json')
+    params_file = Path('config/best_params.json')
     if params_file.exists():
         with open(params_file) as f:
             all_params = json.load(f)
