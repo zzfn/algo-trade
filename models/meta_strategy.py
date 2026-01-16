@@ -34,7 +34,7 @@ class MetaStrategyModel:
         ]
         
         # 目标参数
-        target_params = ['signal_threshold', 'top_n_trades', 'l1_risk_factor']
+        target_params = ['signal_threshold', 'top_n_trades']
         
         # 为每个参数训练一个模型
         for param in target_params:
@@ -97,9 +97,6 @@ class MetaStrategyModel:
             elif param_name == 'signal_threshold':
                 # 限制在合理范围
                 params[param_name] = np.clip(pred, 0.35, 0.60)
-            elif param_name == 'l1_risk_factor':
-                # 限制在合理范围
-                params[param_name] = np.clip(pred, 0.2, 0.8)
             else:
                 params[param_name] = pred
         

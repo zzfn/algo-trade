@@ -2,15 +2,15 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from data.provider import DataProvider
-from features.macro import L1FeatureBuilder
+from features.macro import MacroFeatureBuilder
 from features.technical import FeatureBuilder
 from models.trainer import SklearnClassifierTrainer, RankingModelTrainer, SignalClassifierTrainer, RiskModelTrainer
 from models.smc_rules import get_smc_risk_params
 from models.constants import (
     get_feature_columns, get_allocation_by_return,
-    L1_SAFE_THRESHOLD, SIGNAL_THRESHOLD, L1_RISK_FACTOR,
+    SIGNAL_THRESHOLD,
     L1_LOOKBACK_DAYS, L2_LOOKBACK_DAYS, L3_LOOKBACK_DAYS,
-    L1_SYMBOLS, L2_SYMBOLS, TOP_N_TRADES
+    MACRO_SYMBOLS, L2_SYMBOLS, TOP_N_TRADES
 )
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from utils.logger import setup_logger
@@ -20,21 +20,24 @@ logger = setup_logger("engine")
 class StrategyEngine:
     def __init__(self):
         self.provider = DataProvider()
-        self.l1_builder = L1FeatureBuilder()
+        self.macro_builder = MacroFeatureBuilder()
         self.l2_builder = FeatureBuilder()
         
         # Load models
-        self.l1_model = SklearnClassifierTrainer().load("models/artifacts/l1_market_timing.joblib")
+        # L1 Model Removed (Unified into L4)
+        
         self.l2_model = RankingModelTrainer().load("models/artifacts/l2_stock_selection.joblib")
+        # L3 might need update if it depends on 5min, but for now we focus on L1/L4 unification.
+        
         self.l3_model = SignalClassifierTrainer().load("models/artifacts/l3_execution.joblib")
         
-        # L4: 收益预测模型 (新版)
+        # L4: Unified Return Predictor (Replacing separate L4)
         self.l4_trainer = RiskModelTrainer()
-        self.l4_return_model = self.l4_trainer.load("models/artifacts/l4_return_predictor.joblib", "return_predictor")
+        self.l4_return_model = self.l4_trainer.load("models/artifacts/unified_return_predictor.joblib", "return_predictor")
         
         # 使用配置文件中的标的池
         self.l2_symbols = L2_SYMBOLS
-        self.l1_symbols = L1_SYMBOLS
+        self.macro_symbols = MACRO_SYMBOLS
 
     def analyze(self, target_dt: datetime):
         """
@@ -43,41 +46,41 @@ class StrategyEngine:
         """
         results = {}
         
-        # --- L1: Market Timing ---
-        l1_start = target_dt - timedelta(days=L1_LOOKBACK_DAYS)
+        # --- Macro: Market Timing (Data Only) ---
+        macro_start = target_dt - timedelta(days=L1_LOOKBACK_DAYS)
         
-        # ✅ 批量获取所有市场指标数据 (优化性能)
-        df_l1_all = self.provider.fetch_bars(
-            self.l1_symbols,  # 批量查询 ['SPY', 'VIXY', 'TLT']
-            TimeFrame.Day, 
-            l1_start, 
+        # ✅ 批量获取所有市场指标数据 (1H)
+        df_macro_all = self.provider.fetch_bars(
+            self.macro_symbols,  # ['SPY', 'VIXY', 'TLT']
+            TimeFrame.Hour,   # Unified to 1H
+            macro_start, 
             target_dt + timedelta(days=1), 
             use_redis=True
         )
         
         # 按标的分组
-        df_l1_dict = {}
-        if not df_l1_all.empty:
-            grouped = df_l1_all.groupby('symbol')
+        df_macro_dict = {}
+        if not df_macro_all.empty:
+            grouped = df_macro_all.groupby('symbol')
             for sym, df in grouped:
-                df_l1_dict[sym] = df
+                df_macro_dict[sym] = df
         
-        df_l1_feats = self.l1_builder.build_l1_features(df_l1_dict)
-        df_l1_feats = df_l1_feats[df_l1_feats['timestamp'] <= target_dt]
+        df_macro_feats = self.macro_builder.build_macro_features(df_macro_dict)
+        df_macro_feats = df_macro_feats[df_macro_feats['timestamp'] <= target_dt]
         
-        if df_l1_feats.empty:
-            results['l1_safe'] = False
-            results['l1_prob'] = 0.0
-        else:
-            latest_l1 = df_l1_feats.iloc[-1:]
-            l1_features = ['spy_return_1d', 'spy_dist_ma200', 'vixy_level', 'vixy_change_1d', 'tlt_return_5d']
-            prob = self.l1_model.predict_proba(latest_l1[l1_features])[0][1]
-            results['l1_safe'] = prob > L1_SAFE_THRESHOLD
-            results['l1_prob'] = prob
+        # Unified Model doesn't output a separate 'safe' flag.
+        # We set it to True as the Unified Risk Model will handle bad markets by predicting low returns.
+        results['macro_safe'] = True 
+        results['macro_prob'] = 1.0
+        
+        if df_macro_feats.empty:
+            logger.warning("Macro features empty!")
 
         # --- L2: Stock Selection (5min) ---
+        # --- L2: Stock Selection (1H) ---
         l2_start = target_dt - timedelta(days=L2_LOOKBACK_DAYS)
-        df_l2_raw = self.provider.fetch_bars(self.l2_symbols, TimeFrame(5, TimeFrameUnit.Minute), l2_start, target_dt + timedelta(days=1), use_redis=True)
+        # Fetch 1H data
+        df_l2_raw = self.provider.fetch_bars(self.l2_symbols, TimeFrame.Hour, l2_start, target_dt + timedelta(days=1), use_redis=True)
         df_l2_feats = self.l2_builder.add_all_features(df_l2_raw, is_training=False)
         
         l2_valid = df_l2_feats[df_l2_feats['timestamp'] <= target_dt]
@@ -94,15 +97,16 @@ class StrategyEngine:
         l2_latest['rank_score'] = self.l2_model.predict(l2_latest[l2_features])
         
         # 预测后合并 L1 特征 (供 L4 使用)
-        l2_latest = self.l2_builder.merge_l1_features(l2_latest, df_l1_feats)
+        l2_latest = self.l2_builder.merge_l1_features(l2_latest, df_macro_feats)
         
         results['l2_ranked'] = l2_latest.sort_values('rank_score', ascending=False)
         results['l2_timestamp'] = last_h_ts
 
-        # --- L3: Trend Confirmation (5min) ---
+        # --- L3: Trend Confirmation (1H) ---
         all_l2_symbols = l2_latest['symbol'].tolist()
         l3_start = target_dt - timedelta(days=L3_LOOKBACK_DAYS)
-        df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame(5, TimeFrameUnit.Minute), l3_start, target_dt + timedelta(days=1), use_redis=True)
+        # Fetch 1H data
+        df_l3_raw = self.provider.fetch_bars(all_l2_symbols, TimeFrame.Hour, l3_start, target_dt + timedelta(days=1), use_redis=True)
         df_l3_feats = self.l2_builder.add_all_features(df_l3_raw, is_training=False)
         
         l3_valid = df_l3_feats[df_l3_feats['timestamp'] <= target_dt]
@@ -120,7 +124,7 @@ class StrategyEngine:
             l3_latest['short_p'] = probs[:, 2]
             
             # 预测后合并 L1 特征 (供 L4 使用)
-            l3_latest = self.l2_builder.merge_l1_features(l3_latest, df_l1_feats)
+            l3_latest = self.l2_builder.merge_l1_features(l3_latest, df_macro_feats)
             
             results['l3_signals'] = l3_latest
             results['l3_timestamp'] = last_ts
@@ -168,13 +172,13 @@ class StrategyEngine:
             仓位分配比例 (如 0.10 表示 10%)
         """
         predicted_return = self.predict_return(symbol, l2_ranked)
-        # Fix: 使用绝对值计算仓位 (无论是做多还是做空，只要预期幅度大就加大仓位)
+        # Use absolute value to size position based on magnitude of opportunity
         base_allocation = get_allocation_by_return(abs(predicted_return))
         
-        # L1 风险调整: 市场不安全时降低仓位
-        if not l1_safe:
-            # 使用配置的风险系数降低仓位
-            return base_allocation * L1_RISK_FACTOR
+        # Unified Model handles macro risk implicitly via 'predicted_return'.
+        # If macro is bad, predicted_return should be low/negative.
+        # We can still enforce a manual override if 'l1_safe' was passed as False, 
+        # but in this architecture l1_safe is always True (or unused).
         
         return base_allocation
 
