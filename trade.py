@@ -187,6 +187,16 @@ class TradingBot:
         results = self.engine.analyze(target_dt)
         if results.get('l2_ranked') is None or results['l2_ranked'].empty:
             logger.error("❌ No strategy data available.")
+            # 即使没有数据，也要发布状态告诉前端市场虽然开放但数据不足
+            self.publish_state(
+                account=account,
+                positions=positions,
+                long_signals=pd.DataFrame(),
+                short_signals=pd.DataFrame(),
+                l1_safe=True, # Default to safe if unknown
+                l1_prob=0.0,
+                is_market_open=True
+            )
             return
 
         l1_safe = results.get('l1_safe', False)
@@ -195,6 +205,15 @@ class TradingBot:
 
         if l3_signals.empty:
             logger.error("❌ No signal data available.")
+            self.publish_state(
+                account=account,
+                positions=positions,
+                long_signals=pd.DataFrame(),
+                short_signals=pd.DataFrame(),
+                l1_safe=l1_safe, 
+                l1_prob=0.0,
+                is_market_open=True
+            )
             return
             
         l3_ts = results.get('l3_timestamp')
