@@ -3,8 +3,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 from data.provider import DataProvider
 from features.technical import FeatureBuilder
-from models.trainer import RankingModelTrainer
-from models.constants import get_feature_columns
+from training.trainer import RankingModelTrainer
+from config.settings import get_feature_columns
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 

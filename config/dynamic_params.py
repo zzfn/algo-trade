@@ -17,7 +17,7 @@ class DynamicParams:
     def _load_l5_model(self):
         """尝试加载 L5 模型"""
         try:
-            from models.meta_strategy import MetaStrategyModel
+            from strategies.meta_strategy import MetaStrategyModel
             model_path = Path('models/artifacts/l5_meta_strategy.joblib')
             
             if model_path.exists():

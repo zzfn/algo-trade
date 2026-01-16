@@ -2,8 +2,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 from data.provider import DataProvider
 from features.technical import FeatureBuilder
-from models.trainer import SignalClassifierTrainer
-from models.constants import get_feature_columns, L2_SYMBOLS
+from training.trainer import SignalClassifierTrainer
+from config.settings import get_feature_columns, L2_SYMBOLS
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 

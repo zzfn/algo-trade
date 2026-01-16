@@ -3,7 +3,7 @@
 """
 
 import pandas as pd
-from models.meta_strategy import MetaStrategyModel
+from strategies.meta_strategy import MetaStrategyModel
 from pathlib import Path
 
 def train_l5_model():

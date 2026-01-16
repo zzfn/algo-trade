@@ -10,9 +10,9 @@ from alpaca.trading.requests import MarketOrderRequest, GetOrdersRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
 import numpy as np
 from alpaca.data.timeframe import TimeFrame
-from models.engine import StrategyEngine
-from models.constants import TOP_N_TRADES, SIGNAL_THRESHOLD, L1_RISK_FACTOR
-from models.dynamic_params import get_dynamic_params
+from strategies.engine import StrategyEngine
+from config.settings import TOP_N_TRADES, SIGNAL_THRESHOLD, L1_RISK_FACTOR
+from config.dynamic_params import get_dynamic_params
 from utils.logger import setup_logger
 import json
 from pathlib import Path

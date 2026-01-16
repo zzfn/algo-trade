@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
-from models.engine import StrategyEngine
-from models.constants import L2_SYMBOLS, L3_LOOKBACK_DAYS, SIGNAL_THRESHOLD, get_feature_columns
+from strategies.engine import StrategyEngine
+from config.settings import L2_SYMBOLS, L3_LOOKBACK_DAYS, SIGNAL_THRESHOLD, get_feature_columns
 from utils.logger import setup_logger
 
 load_dotenv()
@@ -51,7 +51,7 @@ def run_l3_backtest_vbt(symbol, days=30, cash=10000.0):
     
     # --- 计算动态风控参数 (关键更新) ---
     logger.info("计算 SMC 动态止盈止损参数...")
-    from models.smc_rules import get_smc_risk_params
+    from strategies.smc_rules import get_smc_risk_params
     
     # 初始化动态列
     df_test['sl_pct'] = np.nan

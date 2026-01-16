@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 # 导入稳健训练模块
-from models.robust_trainer import RobustTrainer, RobustTrainConfig
+from training.robust_trainer import RobustTrainer, RobustTrainConfig
 
 
 class RankingModelTrainer:
@@ -76,7 +76,7 @@ class RankingModelTrainer:
     def _load_best_params(self) -> dict:
         """从 JSON 文件加载最佳参数"""
         try:
-            path = Path('models/best_params.json')
+            path = Path('config/best_params.json')
             if path.exists():
                 with open(path, 'r') as f:
                     all_params = json.load(f)

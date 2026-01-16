@@ -3,8 +3,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 from data.provider import DataProvider
 from features.technical import FeatureBuilder
-from models.trainer import RiskModelTrainer
-from models.constants import get_feature_columns, L2_SYMBOLS
+from training.trainer import RiskModelTrainer
+from config.settings import get_feature_columns, L2_SYMBOLS
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 
@@ -31,7 +31,7 @@ def train_unified_model():
     start_date_macro = end_date - timedelta(days=365 * 2) 
     
     from features.macro import MacroFeatureBuilder
-    from models.constants import MACRO_SYMBOLS
+    from config.settings import MACRO_SYMBOLS
     
     macro_builder = MacroFeatureBuilder()
     macro_dict = {}

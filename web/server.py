@@ -16,8 +16,8 @@ from dotenv import load_dotenv
 
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from web.state_manager import StateManager
-from models.engine import StrategyEngine
-from models.constants import TOP_N_TRADES, SIGNAL_THRESHOLD, get_feature_columns, L3_LOOKBACK_DAYS, L2_SYMBOLS
+from strategies.engine import StrategyEngine
+from config.settings import TOP_N_TRADES, SIGNAL_THRESHOLD, get_feature_columns, L3_LOOKBACK_DAYS, L2_SYMBOLS
 from scripts.backtest import BacktestEngine
 
 app = FastAPI(

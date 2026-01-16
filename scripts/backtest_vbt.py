@@ -14,8 +14,8 @@ import vectorbt as vbt
 from datetime import datetime, timedelta
 from data.provider import DataProvider
 from features.technical import FeatureBuilder
-from models.engine import StrategyEngine
-from models.constants import L2_SYMBOLS, SIGNAL_THRESHOLD
+from strategies.engine import StrategyEngine
+from config.settings import L2_SYMBOLS, SIGNAL_THRESHOLD
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 import argparse

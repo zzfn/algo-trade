@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from data.provider import DataProvider
-from models.engine import StrategyEngine
-from models.constants import (
+from strategies.engine import StrategyEngine
+from config.settings import (
     get_feature_columns, 
     SIGNAL_THRESHOLD, 
     TOP_N_TRADES,

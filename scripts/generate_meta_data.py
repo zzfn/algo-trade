@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 from data.provider import DataProvider
 from features.technical import FeatureBuilder
 from features.macro import MacroFeatureBuilder
-from models.engine import StrategyEngine
-from models.constants import L2_SYMBOLS, MACRO_SYMBOLS
+from strategies.engine import StrategyEngine
+from config.settings import L2_SYMBOLS, MACRO_SYMBOLS
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from dotenv import load_dotenv
 from pathlib import Path

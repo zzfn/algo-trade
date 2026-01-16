@@ -6,8 +6,8 @@ import numpy as np
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
-from models.engine import StrategyEngine
-from models.constants import L2_SYMBOLS, get_feature_columns, TOP_N_TRADES, get_allocation_by_return
+from strategies.engine import StrategyEngine
+from config.settings import L2_SYMBOLS, get_feature_columns, TOP_N_TRADES, get_allocation_by_return
 from utils.logger import setup_logger
 
 load_dotenv()

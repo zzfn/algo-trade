@@ -5,7 +5,7 @@ SMC (Smart Money Concepts) 规则引擎
 """
 
 import pandas as pd
-from models.constants import RISK_REWARD_RATIO, STOP_LOSS_BUFFER
+from config.settings import RISK_REWARD_RATIO, STOP_LOSS_BUFFER
 
 
 def get_smc_stop_loss(row: pd.Series, direction: str) -> float:

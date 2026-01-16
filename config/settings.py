@@ -13,7 +13,7 @@
 
 # --- 动态参数 (自动从 L5 加载) ---
 try:
-    from models.dynamic_params import get_dynamic_params
+    from config.dynamic_params import get_dynamic_params
     _params = get_dynamic_params()
     SIGNAL_THRESHOLD = _params['signal_threshold']  # L5 动态优化 ⭐
     TOP_N_TRADES = _params['top_n_trades']          # L5 动态优化 ⭐

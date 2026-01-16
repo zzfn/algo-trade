@@ -2,8 +2,8 @@ from datetime import datetime
 import pytz
 import argparse
 from dotenv import load_dotenv
-from models.engine import StrategyEngine
-from models.constants import TOP_N_TRADES, SIGNAL_THRESHOLD
+from strategies.engine import StrategyEngine
+from config.settings import TOP_N_TRADES, SIGNAL_THRESHOLD
 from utils.logger import setup_logger
 
 # 初始化日志

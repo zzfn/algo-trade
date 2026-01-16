@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import joblib
 import matplotlib.pyplot as plt
-from models.trainer import RankingModelTrainer, SignalClassifierTrainer, RiskModelTrainer, SklearnClassifierTrainer
+from training.trainer import RankingModelTrainer, SignalClassifierTrainer, RiskModelTrainer, SklearnClassifierTrainer
 
 def inspect_models():
     print("📊 模型特征重要性分析 (Feature Importance Analysis)\n")

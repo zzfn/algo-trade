@@ -8,7 +8,7 @@ from alpaca.data.enums import DataFeed
 from alpaca.data.timeframe import TimeFrame
 from dotenv import load_dotenv
 
-from models.constants import L2_SYMBOLS
+from config.settings import L2_SYMBOLS
 from data.redis_manager import RedisDataManager
 
 # 配置日志

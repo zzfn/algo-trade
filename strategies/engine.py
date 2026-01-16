@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 from data.provider import DataProvider
 from features.macro import MacroFeatureBuilder
 from features.technical import FeatureBuilder
-from models.trainer import SklearnClassifierTrainer, RankingModelTrainer, SignalClassifierTrainer, RiskModelTrainer
-from models.smc_rules import get_smc_risk_params
-from models.constants import (
+from training.trainer import SklearnClassifierTrainer, RankingModelTrainer, SignalClassifierTrainer, RiskModelTrainer
+from strategies.smc_rules import get_smc_risk_params
+from config.settings import (
     get_feature_columns, get_allocation_by_return,
     SIGNAL_THRESHOLD,
     L1_LOOKBACK_DAYS, L2_LOOKBACK_DAYS, L3_LOOKBACK_DAYS,
