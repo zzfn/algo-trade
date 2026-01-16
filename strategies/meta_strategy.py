@@ -92,13 +92,17 @@ class MetaStrategyModel:
             pred = model.predict(X)[0]
             
             if param_name == 'top_n_trades':
-                # 转换回整数 (0->2, 1->3, 2->4, 3->5)
+                # 转换回整数 (0->2, 1->3, 2->3, 3->5)
                 params[param_name] = int(pred) + 2
             elif param_name == 'signal_threshold':
                 # 限制在合理范围
                 params[param_name] = np.clip(pred, 0.35, 0.60)
             else:
                 params[param_name] = pred
+        
+        # 确保包含 l1_risk_factor (固定值，该参数不再由 L5 动态预测)
+        if 'l1_risk_factor' not in params:
+            params['l1_risk_factor'] = 0.633
         
         return params
     
