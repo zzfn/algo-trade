@@ -10,10 +10,9 @@ def inspect_models():
     
     # 定义模型加载器和路径
     models = [
-        ("L1 Market Timing", "models/artifacts/l1_market_timing.joblib", SklearnClassifierTrainer()),
         ("L2 Stock Selection", "models/artifacts/l2_stock_selection.joblib", RankingModelTrainer()),
         ("L3 Execution", "models/artifacts/l3_execution.joblib", SignalClassifierTrainer()),
-        ("L4 Risk Predictor", "models/artifacts/l4_return_predictor.joblib", RiskModelTrainer())
+        ("Unified L4 (Return Predictor)", "models/artifacts/unified_return_predictor.joblib", RiskModelTrainer())
     ]
     
     # 翻译字典 (English -> Chinese Description)
